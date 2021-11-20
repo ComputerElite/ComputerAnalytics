@@ -346,6 +346,20 @@ namespace ComputerAnalytics
                 File.Delete(filename);
                 return true;
             }));
+            server.AddRoute("GET", "/metrics", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                Metrics m = new Metrics();
+                Process currentProcess = Process.GetCurrentProcess();
+                m.ramUsage = currentProcess.WorkingSet64;
+                m.ramUsageString = SizeConverter.ByteSizeToString(m.ramUsage);
+                request.SendString(JsonSerializer.Serialize(m), "application/json");
+                return true;
+            }));
             server.AddRoute("POST", "/update", new Func<ServerRequest, bool>(request =>
             {
                 if (GetToken(request) != collection.config.masterToken)

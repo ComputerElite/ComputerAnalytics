@@ -15,6 +15,12 @@ namespace ComputerAnalytics
         public int port { get; set; } = 502;
     }
 
+    public class Metrics
+    {
+        public long ramUsage { get; set; } = 0;
+        public string ramUsageString { get; set; } = "";
+    }
+
     public class Website
     {
         public string url { get; set; } = "";

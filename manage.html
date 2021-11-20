@@ -43,6 +43,12 @@
             <div onclick="Update()" class="customButton">Update server</div>
             <div style="width: 90%; background-color: #bbbbbb; height: 10px;"><div style="background-color: #42bbeb; height: 100%; width: 0%;" id="progress"></div></div>
             <div onclick="Export()" class="customButton">Export all data</div>
+            <table>
+                <tr>
+                    <td>Ram usage</td>
+                    <td id="ram"></td>
+                </tr>
+            </table>
             <h4>Websites</h4>
             <div id="websites">
 
@@ -138,6 +144,9 @@
             }
             fetch("/publicaddress").then(res => res.text().then(t => {
                 document.getElementById("ip").value = t
+            }))
+            fetch("/metrics").then(res => res.json().then(json => {
+                document.getElementById("ram").innerHTML = json.ramUsageString
             }))
             fetch("/websites").then(res => {
                 res.json().then(w => {
