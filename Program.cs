@@ -201,22 +201,25 @@ namespace ComputerAnalytics
                     List<AnalyticsData> datas = JsonSerializer.Deserialize<List<AnalyticsData>>(request.bodyString);
                     int i = 0;
                     int rejected = 0;
+                    string publicToken = collection.GetPublicTokenFromPrivateToken(GetToken(request));
                     foreach(AnalyticsData analyticsData in datas)
                     {
-                        if (!collection.Contains(analyticsData))
+                        if (analyticsData.token == "") analyticsData.token = publicToken;
+                        try
                         {
-                            
-                            try
+                            if (!collection.Contains(analyticsData))
                             {
+
                                 collection.AddAnalyticsToWebsite(AnalyticsData.ImportAnalyticsEntry(analyticsData));
                                 i++;
-                            } catch (Exception e)
-                            {
-                                Logger.Log("Expection while importing Analytics data:\n" + e.Message, LoggingType.Warning);
-                                rejected++;
+
                             }
-                            
+                        } catch (Exception e)
+                        {
+                            Logger.Log("Expection while importing Analytics data:\n" + e.Message, LoggingType.Warning);
+                            rejected++;
                         }
+                        
                     }
                     request.SendString("Imported " + i + " AnalyticsDatas, rejected " + rejected + " AnalyticsDatas");
                 } catch (Exception e)
@@ -275,6 +278,16 @@ namespace ComputerAnalytics
                 request.SendString("True");
                 return true;
             }));
+            server.AddRoute("POST", "/publicaddress", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(collection.SetPublicAddress(request.bodyString), "application/json");
+                return true;
+            }));
         }
 
         public string GetToken(ServerRequest request)
@@ -324,8 +337,9 @@ namespace ComputerAnalytics
         public Config config = new Config();
         public string analyticsDir = "";
 
-        public void LoadAllDatabases(string analyticsDir = "analytics\\")
+        public void LoadAllDatabases(string analyticsDir = "analytics")
         {
+            if (!analyticsDir.EndsWith(Path.DirectorySeparatorChar)) analyticsDir += Path.DirectorySeparatorChar;
             this.analyticsDir = analyticsDir;
             Logger.Log("Loading all databases");
             FileManager.CreateDirectoryIfNotExisting(analyticsDir);
@@ -340,10 +354,11 @@ namespace ComputerAnalytics
             Logger.Log("Loaded all databases");
         }
 
-        public void SetPublicAddress(string newAddress)
+        public string SetPublicAddress(string newAddress)
         {
             config.publicAddress = newAddress;
             SaveConfig();
+            return "Set public address to " + GetPublicAddress() + ". Please restart the server for the changes to apply.";
         }
 
         public string GetPublicAddress()
@@ -356,6 +371,15 @@ namespace ComputerAnalytics
             foreach(Website w in config.Websites)
             {
                 if (w.url == origin) return w.publicToken;
+            }
+            return "";
+        }
+
+        public string GetPublicTokenFromPrivateToken(string privateToken)
+        {
+            foreach (Website w in config.Websites)
+            {
+                if (w.privateToken == privateToken) return w.publicToken;
             }
             return "";
         }
@@ -463,7 +487,7 @@ namespace ComputerAnalytics
             website.url = host;
             website.publicToken = CreateRandomToken();
             website.privateToken = CreateRandomToken();
-            website.folder = StringFormatter.FileNameSafe(host).Replace("https", "").Replace("http", "") + "\\";
+            website.folder = StringFormatter.FileNameSafe(host).Replace("https", "").Replace("http", "") + Path.DirectorySeparatorChar;
             if (Directory.Exists(analyticsDir + website.folder)) return "Website already exists";
             AnalyticsDatabase database = new AnalyticsDatabase(analyticsDir + website.folder);
             databases.Add(database);
@@ -555,11 +579,12 @@ namespace ComputerAnalytics
 
     class AnalyticsDatabase
     {
-        public static string analyticsDirectory { get; set; } = "analytics\\";
+        public static string analyticsDirectory { get; set; } = "analytics" + Path.DirectorySeparatorChar;
         public List<AnalyticsData> data { get; set; } = new List<AnalyticsData>();
 
-        public AnalyticsDatabase(string analyticsDir = "analytics\\")
+        public AnalyticsDatabase(string analyticsDir = "analytics")
         {
+            if (!analyticsDir.EndsWith(Path.DirectorySeparatorChar)) analyticsDir += Path.DirectorySeparatorChar;
             bool log = Logger.displayLogInConsole;
             Logger.displayLogInConsole = true;
             Logger.Log("Loading database in " + analyticsDir);

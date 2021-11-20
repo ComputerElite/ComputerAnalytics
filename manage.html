@@ -36,8 +36,10 @@
     </head>
     <body>
         <div style="display: flex; justify-content: center; flex-direction: column; align-items: center;">
-            <input type="text" id="name">
+            <input placeholder="Website URL" type="text" id="name">
             <div onclick="Create()" class="customButton">Add Website</div>
+            <input placeholder="IP Address" type="text" id="ip">
+            <div onclick="IP()" class="customButton">Set public address</div>
             <h4>Websites</h4>
             <div id="websites">
 
@@ -61,6 +63,19 @@
                 var url = document.getElementById("name").value
                 if(url.endsWith("/")) url = url.substring(0, url.length - 1)
                 fetch("/website", {
+                    method: "POST",
+                    body: url
+                }).then(res => {
+                    res.text().then(t => {
+                        alert(t)
+                        location.reload()
+                    })
+                })
+            }
+            function IP() {
+                var url = document.getElementById("ip").value
+                if(url.endsWith("/")) url = url.substring(0, url.length - 1)
+                fetch("/publicaddress", {
                     method: "POST",
                     body: url
                 }).then(res => {
