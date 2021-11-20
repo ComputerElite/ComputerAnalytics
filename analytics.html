@@ -39,14 +39,10 @@
     <script>
         const trafficDateContainer = "trafficDateContainer"
         const imp = document.getElementById("import")
-        const params = new URLSearchParams(window.location.search)
-        var param = new URLSearchParams()
+        const param = new URLSearchParams(window.location.search)
         const referrers = document.getElementById("referrers")
         const queryString = document.getElementById("querystring")
-        if(params.has("host")) param.append("host", params.get("host"))
-        if(params.has("endpoint")) param.append("endpoint", params.get("endpoint"))
-        if(params.has("querystring")) param.append("querystring", params.get("querystring"))
-        if(params.has("referrer")) param.append("referrer", params.get("referrer"))
+
         // Display everything
         fetch("/analytics/date?" + param.toString()).then(res => res.json().then(json => {
             var clicks = {x: [], y: [], fill: 'tozeroy', type: "scatter", line: {color: "#1a9c00", width: 3}, name: "clicks", marker: {size: 8}}
@@ -58,6 +54,13 @@
                 users.y.push(element.totalUniqueIPs)
             });
             Plotly.newPlot(trafficDateContainer, [clicks, users], layout)
+            document.getElementById(trafficDateContainer).on('plotly_click', function(data){
+                var pts = '';
+                for(var i=0; i < data.points.length; i++){
+                    pts = data.points[i].x;
+                }
+                SetDate(pts)
+            });
         }))
         function SetHostAndEndpoint(host, endpoint) {
             param.set("host", host)
@@ -72,6 +75,10 @@
             param.set("querystring", queryString)
             Reload()
         }
+        function SetDate(date) {
+            param.set("date", date)
+            Reload()
+        }
         function Reload() {
             window.location.href = "?" + param.toString()
         }
@@ -79,10 +86,15 @@
             document.getElementById("hosts").innerHTML = ""
             json.forEach(element => {
                 var endpoints = ""
+                element.endpoints.sort((a, b) => {
+                    if (a.clicks < b.clicks) return 1;
+                    if (a.clicks > b.clicks) return -1;
+                    return 0;
+                })
                 element.endpoints.forEach(e => {
                     endpoints += `<div style="display: flex; flex-direction: column; border: #EEEEEE 1px solid; min-width: 24%; padding: 5px;" onclick="SetHostAndEndpoint('${e.host}', '${e.endpoint}')">
                                     <a style="font-weight: bold;" href="${e.fullUri}">${e.endpoint}</a>
-                                    <div>${e.clicks} clicks</div>
+                                    <div>${e.clicks} clicks (${Math.round(e.clicks / element.totalClicks * 10000) / 100} %)</div>
                                     <div>${e.uniqueIPs} unique IPs</div>
                                     <div>avg. ${ToElapsed(e.avgDuration)} min per visit</div>
                                 </div>`
