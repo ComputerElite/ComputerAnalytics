@@ -11,9 +11,6 @@
     <ProjectReference Include="..\..\ComputerUtils\ComputerUtils\ComputerUtils.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="plotly.js" />
-  </ItemGroup>
-  <ItemGroup>
     <EmbeddedResource Include="analytics.js" />
   </ItemGroup>
   <ItemGroup>

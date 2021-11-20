@@ -9,11 +9,13 @@ using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace ComputerAnalytics
@@ -22,6 +24,30 @@ namespace ComputerAnalytics
     {
         static void Main(string[] args)
         {
+            if(args.Length >= 1 && args[0] == "update")
+            {
+                Logger.Log("Replacing everything with zip contents.");
+                Thread.Sleep(1000);
+                string destDir = new DirectoryInfo(Path.GetDirectoryName(AppDomain.CurrentDomain.BaseDirectory)).Parent.FullName + Path.DirectorySeparatorChar;
+                using (ZipArchive archive = ZipFile.OpenRead(destDir + "updater" + Path.DirectorySeparatorChar +  "update.zip"))
+                {
+                    foreach (ZipArchiveEntry entry in archive.Entries)
+                    {
+                        String name = entry.FullName;
+                        if (name.EndsWith("/")) continue;
+                        if (name.Contains("/")) Directory.CreateDirectory(destDir + Path.GetDirectoryName(name));
+                        entry.ExtractToFile(destDir + entry.FullName, true);
+                    }
+                }
+                ProcessStartInfo i = new ProcessStartInfo
+                {
+                    FileName = "dotnet",
+                    Arguments = "\"" + destDir + "ComputerAnalytics.dll\"",
+                    UseShellExecute = true
+                };
+                Process.Start(i);
+                Environment.Exit(0);
+            }
             AnalyticsServer s = new AnalyticsServer();
             HttpServer server = new HttpServer();
             s.AddToServer(server);
@@ -44,11 +70,12 @@ namespace ComputerAnalytics
         /// <param name="allowedOrigins">Allowed origins which can send analytics data to this server. default: all</param>
         public void AddToServer(HttpServer httpServer, List<string> serverUris = null, Func<ServerRequest, bool> analyticsViewingAuthorization = null, Func<ServerRequest, bool> analyticsSendingAuthorization = null, List<string> allowedOrigins = null)
         {
+            Logger.displayLogInConsole = true;
             collection.LoadAllDatabases();
             this.server = httpServer;
-            server.StartServer(502, false, new string[] { collection.GetPublicAddress() }, true);
+            server.StartServer(collection.config.port);
+            /*
             if (serverUris == null) serverUris = new List<string>();
-            Logger.displayLogInConsole = true;
             foreach(string prefix in server.GetPrefixes())
             {
                 if (!serverUris.Contains(prefix)) serverUris.Add(prefix);
@@ -59,7 +86,8 @@ namespace ComputerAnalytics
                 Logger.Log("Analytics can be send to " + x);
             });
             string serverUrisString = "\"" + String.Join("\",\"", serverUris) + "\"";
-            
+            */
+            Logger.Log("Analytics will be send to " + collection.GetPublicAddress());
             server.AddRoute("POST", "/analytics", new Func<ServerRequest, bool>(request =>
             {
                 string origin = request.context.Request.Headers.Get("Origin");
@@ -258,6 +286,16 @@ namespace ComputerAnalytics
                 request.SendString(collection.CreateWebsite(request.bodyString), "application/json");
                 return true;
             }));
+            server.AddRoute("POST", "/renewtokens", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(collection.RenewTokens(request.bodyString), "application/json");
+                return true;
+            }));
             server.AddRoute("GET", "/manage", new Func<ServerRequest, bool>(request =>
             {
                 if (GetToken(request) != collection.config.masterToken)
@@ -286,6 +324,52 @@ namespace ComputerAnalytics
                     return true;
                 }
                 request.SendString(collection.SetPublicAddress(request.bodyString), "application/json");
+                return true;
+            }));
+            server.AddRoute("GET", "/publicaddress", new Func<ServerRequest, bool>(request =>
+            {
+                request.SendString(collection.GetPublicAddress(), "application/json");
+                return true;
+            }));
+            server.AddRoute("GET", "/export", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                string filename = DateTime.Now.Ticks + ".zip";
+                Logger.Log("Exporting all data as zip. This may take a minute to do");
+                ZipFile.CreateFromDirectory(collection.analyticsDir, filename);
+                Logger.Log("Sending zip");
+                request.SendFile(filename);
+                File.Delete(filename);
+                return true;
+            }));
+            server.AddRoute("POST", "/update", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                FileManager.RecreateDirectoryIfExisting("updater");
+                string zip = "updater" + Path.DirectorySeparatorChar + "update.zip";
+                File.WriteAllBytes(zip, request.bodyBytes);
+                foreach(string s in Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory))
+                {
+                    File.Copy(s, "updater" + Path.DirectorySeparatorChar + Path.GetFileName(s), true);
+                }
+                //Logger.Log("dotnet \"" + AppDomain.CurrentDomain.BaseDirectory + "updater" + Path.DirectorySeparatorChar + "ComputerAnalytics.dll\" update");
+                request.SendString("Starting update. Please wait a bit and come back.");
+                ProcessStartInfo i = new ProcessStartInfo
+                {
+                    Arguments = "\"" + AppDomain.CurrentDomain.BaseDirectory + "updater" + Path.DirectorySeparatorChar + "ComputerAnalytics.dll\" update",
+                    UseShellExecute = true,
+                    FileName = "dotnet"
+                };
+                Process.Start(i);
+                Environment.Exit(0);
                 return true;
             }));
         }
@@ -358,7 +442,7 @@ namespace ComputerAnalytics
         {
             config.publicAddress = newAddress;
             SaveConfig();
-            return "Set public address to " + GetPublicAddress() + ". Please restart the server for the changes to apply.";
+            return "Set public address to " + GetPublicAddress() + ".";
         }
 
         public string GetPublicAddress()
@@ -506,6 +590,21 @@ namespace ComputerAnalytics
                     config.Websites.RemoveAt(i);
                     SaveConfig();
                     return "Deleted " + url + " including all Analytics";
+                }
+            }
+            return "Website not registered";
+        }
+
+        public string RenewTokens(string url)
+        {
+            for (int i = 0; i < config.Websites.Count; i++)
+            {
+                if (config.Websites[i].url == url)
+                {
+                    config.Websites[i].publicToken = CreateRandomToken();
+                    config.Websites[i].privateToken = CreateRandomToken();
+                    SaveConfig();
+                    return "Renewed tokens for " + url;
                 }
             }
             return "Website not registered";

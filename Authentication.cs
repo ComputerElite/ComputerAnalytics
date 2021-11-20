@@ -12,6 +12,7 @@ namespace ComputerAnalytics
         public string masterToken { get; set; } = "";
         public List<string> usedTokens { get; set; } = new List<string>();
         public string publicAddress { get; set; } = "";
+        public int port { get; set; } = 502;
     }
 
     public class Website

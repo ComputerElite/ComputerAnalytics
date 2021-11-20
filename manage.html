@@ -40,6 +40,9 @@
             <div onclick="Create()" class="customButton">Add Website</div>
             <input placeholder="IP Address" type="text" id="ip">
             <div onclick="IP()" class="customButton">Set public address</div>
+            <div onclick="Update()" class="customButton">Update server</div>
+            <div style="width: 90%; background-color: #bbbbbb; height: 10px;"><div style="background-color: #42bbeb; height: 100%; width: 0%;" id="progress"></div></div>
+            <div onclick="Export()" class="customButton">Export all data</div>
             <h4>Websites</h4>
             <div id="websites">
 
@@ -47,7 +50,41 @@
         </div>
         <script>
             const websites = document.getElementById("websites")
+            const progress = document.getElementById("progress")
+            function Update() {
+                var input = document.createElement("input")
+                input.setAttribute("type", "file")
 
+                input.onchange = function (e) {
+                    if (!this.files[0]) {
+                        return;
+                    }
+
+                    var reader = new FileReader();
+                    var fileName = this.files[0].name
+                    reader.onloadend = function () {
+                        var xhr = new XMLHttpRequest()
+                        xhr.upload.addEventListener("progress", function(evt) {
+                            if (evt.lengthComputable) {
+                                var percentComplete = evt.loaded / evt.total;
+                                percentComplete = parseInt(percentComplete * 100);
+                                progress.style.width = percentComplete + "%"
+
+                                if (percentComplete === 100) {
+                                    alert("Update has started. Please reaload the page in a few seconds")
+                                }
+
+                            }
+                        }, false);
+                        xhr.open("POST", "/update")
+                        xhr.send(reader.result)
+
+                    }
+                    reader.readAsArrayBuffer(this.files[0]);
+                }
+
+                input.click()
+            }
             function Delete(url) {
                 fetch("/website", {
                     method: "DELETE",
@@ -58,6 +95,20 @@
                         location.reload()
                     })
                 })
+            }
+            function Renew(url) {
+                fetch("/renewtokens", {
+                    method: "POST",
+                    body: url
+                }).then(res => {
+                    res.text().then(t => {
+                        alert(t)
+                        location.reload()
+                    })
+                })
+            }
+            function Export() {
+                window.open("/export", "_blank")
             }
             function Create() {
                 var url = document.getElementById("name").value
@@ -85,6 +136,9 @@
                     })
                 })
             }
+            fetch("/publicaddress").then(res => res.text().then(t => {
+                document.getElementById("ip").value = t
+            }))
             fetch("/websites").then(res => {
                 res.json().then(w => {
                     w.forEach(e => {
@@ -92,7 +146,8 @@
                                                 <a style="font-weight: bold;" href="${e.url}">${e.url}</a>
                                                 <div>public: ${e.publicToken}</div>
                                                 <div>private: ${e.privateToken}</div>
-                                                <div class="customButton" onclick="Delete('${e.url}')">Delete Website (not undoable)</div>
+                                                <div class="customButton" onclick="Renew('${e.url}')">Renew tokens</div>
+                                                <div class="customButton" onclick="Delete('${e.url}')" style="background-color: #DA3633">Delete Website (not undoable)</div>
                                             </div>`
                     })
                 })
