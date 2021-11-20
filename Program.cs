@@ -1,5 +1,7 @@
 ﻿using ComputerUtils.FileManaging;
 using ComputerUtils.Logging;
+using ComputerUtils.RandomExtensions;
+using ComputerUtils.StringFormatters;
 using ComputerUtils.VarUtils;
 using ComputerUtils.Webserver;
 using System;
@@ -8,6 +10,7 @@ using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -21,7 +24,6 @@ namespace ComputerAnalytics
         {
             AnalyticsServer s = new AnalyticsServer();
             HttpServer server = new HttpServer();
-            server.StartServer(502);
             s.AddToServer(server);
         }
     }
@@ -29,7 +31,7 @@ namespace ComputerAnalytics
     class AnalyticsServer
     {
         public HttpServer server = null;
-        public AnalyticsDatabase database = new AnalyticsDatabase();
+        public AnalyticsDatabaseCollection collection = new AnalyticsDatabaseCollection();
 
         /// <summary>
         /// Adds analytics functionality to a existing and RUNNING server
@@ -42,7 +44,9 @@ namespace ComputerAnalytics
         /// <param name="allowedOrigins">Allowed origins which can send analytics data to this server. default: all</param>
         public void AddToServer(HttpServer httpServer, List<string> serverUris = null, Func<ServerRequest, bool> analyticsViewingAuthorization = null, Func<ServerRequest, bool> analyticsSendingAuthorization = null, List<string> allowedOrigins = null)
         {
+            collection.LoadAllDatabases();
             this.server = httpServer;
+            server.StartServer(502, false, new string[] { collection.GetPublicAddress() }, true);
             if (serverUris == null) serverUris = new List<string>();
             Logger.displayLogInConsole = true;
             foreach(string prefix in server.GetPrefixes())
@@ -58,13 +62,7 @@ namespace ComputerAnalytics
             
             server.AddRoute("POST", "/analytics", new Func<ServerRequest, bool>(request =>
             {
-                if(analyticsSendingAuthorization != null && !analyticsSendingAuthorization.Invoke(request))
-                {
-                    request.SendString(new AnalyticsResponse("rejected", "Your analytics report was rejected by not passing the sending checks. This probably happens because you disable analytic submittion").ToString());
-                    return true;
-                }
                 string origin = request.context.Request.Headers.Get("Origin");
-                if (allowedOrigins != null && !allowedOrigins.Contains(origin)) origin = allowedOrigins[0];
                 AnalyticsData data = new AnalyticsData();
                 try
                 {
@@ -77,12 +75,12 @@ namespace ComputerAnalytics
                 }
                 try
                 {
-                    database.AddAnalyticData(data);
+                    collection.AddAnalyticsToWebsite(origin, data);
                 }
                 catch (Exception e)
                 {
-                    Logger.Log("Error while saving analytics json:\n" + e.ToString(), LoggingType.Warning);
-                    request.SendString(new AnalyticsResponse("error", "Error saving json: " + e.Message).ToString(), "application/json", 500, true, new Dictionary<string, string>() { { "Access-Control-Allow-Origin", origin }, { "Access-Control-Allow-Credentials", "true" } });
+                    Logger.Log("Error while accepting analytics json:\n" + e.ToString(), LoggingType.Warning);
+                    request.SendString(new AnalyticsResponse("error", "Error accepting json: " + e.Message).ToString(), "application/json", 500, true, new Dictionary<string, string>() { { "Access-Control-Allow-Origin", origin }, { "Access-Control-Allow-Credentials", "true" } });
                     return true;
                 }
                 Logger.Log("Added new analytics data: " + data.fileName);
@@ -92,23 +90,29 @@ namespace ComputerAnalytics
             server.AddRoute("OPTIONS", "/analytics", new Func<ServerRequest, bool>(request =>
             {
                 string origin = request.context.Request.Headers.Get("Origin");
-                if (allowedOrigins != null && !allowedOrigins.Contains(origin)) origin = allowedOrigins[0];
-                request.SendData(new byte[0], "", 200, true, new Dictionary<string, string>() { { "Access-Control-Allow-Origin", origin }, { "Access-Control-Allow-Methods", "POST, OPTIONS" }, { "Access-Control-Allow-Credentials", "true" }, { "Access-Control-Allow-Headers", "content-type" } });
+                request.SendData(new byte[0], "", 200, true, new Dictionary<string, string>() { { "Access-Control-Allow-Origin", collection.GetAllowedOrigin(origin) }, { "Access-Control-Allow-Methods", "POST, OPTIONS" }, { "Access-Control-Allow-Credentials", "true" }, { "Access-Control-Allow-Headers", "content-type" } });
                 return true;
             }));
             server.AddRoute("GET", "/analytics.js", new Func<ServerRequest, bool>(request =>
             {
-                request.SendString(ReadResource("analytics.js").Replace("{0}", serverUrisString), "application/javascript");
+                string origin = request.queryString.Get("origin");
+                if(origin == null)
+                {
+                    request.SendString("alert(`Add '?origin=YourSite' to analytics.js src. Replace YourSite with your site e. g. https://computerelite.github.io`)", "application/javascript") ;
+                    return true;
+                }
+                request.SendString(ReadResource("analytics.js").Replace("{0}", "\"" + collection.GetPublicAddress() + "/\"").Replace("{1}", collection.GetPublicToken(origin)), "application/javascript");
                 return true;
             }));
             server.AddRoute("GET", "/analytics", new Func<ServerRequest, bool>(request =>
             {
-                if (analyticsViewingAuthorization != null && analyticsViewingAuthorization.Invoke(request))
-                {
-                    request.Send403();
-                    return true;
-                }
+                if (IsNotLoggedIn(request)) return true;
                 request.SendString(ReadResource("analytics.html"), "text/html");
+                return true;
+            }));
+            server.AddRoute("GET", "/", new Func<ServerRequest, bool>(request =>
+            {
+                request.SendString(ReadResource("login.html"), "text/html");
                 return true;
             }));
             server.AddRoute("GET", "/plotly.min.js", new Func<ServerRequest, bool>(request =>
@@ -118,19 +122,9 @@ namespace ComputerAnalytics
             }));
             server.AddRoute("GET", "/analytics/endpoints", new Func<ServerRequest, bool>(request =>
             {
-                if(analyticsViewingAuthorization != null && analyticsViewingAuthorization.Invoke(request))
-                {
-                    request.Send403();
-                    return true;
-                }
                 try
                 {
-                    string host = request.queryString.Get("host");
-                    string endpoint = request.queryString.Get("endpoint");
-                    string queryString = request.queryString.Get("querystring");
-                    string referrer = request.queryString.Get("referrer");
-                    string date = request.queryString.Get("date");
-                    request.SendString(JsonSerializer.Serialize(database.GetAllEndpointsWithAssociatedData(null, request.queryString)), "application/json");
+                    request.SendString(JsonSerializer.Serialize(collection.GetAllEndpointsWithAssociatedData(request)), "application/json");
                 } catch(Exception e)
                 {
                     Logger.Log("Error while crunching data:\n" + e.ToString(), LoggingType.Warning);
@@ -141,14 +135,10 @@ namespace ComputerAnalytics
             }));
             server.AddRoute("GET", "/analytics/date", new Func<ServerRequest, bool>(request =>
             {
-                if (analyticsViewingAuthorization != null && analyticsViewingAuthorization.Invoke(request))
-                {
-                    request.Send403();
-                    return true;
-                }
+                if (IsNotLoggedIn(request)) return true;
                 try
                 {
-                    request.SendString(JsonSerializer.Serialize(database.GetAllEndpointsSortedByDateWithAssociatedData(null, request.queryString)), "application/json");
+                    request.SendString(JsonSerializer.Serialize(collection.GetAllEndpointsSortedByDateWithAssociatedData(request)), "application/json");
                 }
                 catch (Exception e)
                 {
@@ -160,14 +150,10 @@ namespace ComputerAnalytics
             }));
             server.AddRoute("GET", "/analytics/referrers", new Func<ServerRequest, bool>(request =>
             {
-                if (analyticsViewingAuthorization != null && analyticsViewingAuthorization.Invoke(request))
-                {
-                    request.Send403();
-                    return true;
-                }
+                if (IsNotLoggedIn(request)) return true;
                 try
                 {
-                    request.SendString(JsonSerializer.Serialize(database.GetAllReferrersWithAssociatedData(null, request.queryString)), "application/json");
+                    request.SendString(JsonSerializer.Serialize(collection.GetAllReferrersWithAssociatedData(request)), "application/json");
                 }
                 catch (Exception e)
                 {
@@ -179,14 +165,10 @@ namespace ComputerAnalytics
             }));
             server.AddRoute("GET", "/analytics/querystrings", new Func<ServerRequest, bool>(request =>
             {
-                if (analyticsViewingAuthorization != null && analyticsViewingAuthorization.Invoke(request))
-                {
-                    request.Send403();
-                    return true;
-                }
+                if (IsNotLoggedIn(request)) return true;
                 try
                 {
-                    request.SendString(JsonSerializer.Serialize(database.GetAllQueryStringsWithAssociatedData(null, request.queryString)), "application/json");
+                    request.SendString(JsonSerializer.Serialize(collection.GetAllQueryStringsWithAssociatedData(request)), "application/json");
                 }
                 catch (Exception e)
                 {
@@ -198,14 +180,10 @@ namespace ComputerAnalytics
             }));
             server.AddRoute("GET", "/analytics/hosts", new Func<ServerRequest, bool>(request =>
             {
-                if (analyticsViewingAuthorization != null && analyticsViewingAuthorization.Invoke(request))
-                {
-                    request.Send403();
-                    return true;
-                }
+                if (IsNotLoggedIn(request)) return true;
                 try
                 {
-                    request.SendString(JsonSerializer.Serialize(database.GetAllHostsWithAssociatedData(null, request.queryString)), "application/json");
+                    request.SendString(JsonSerializer.Serialize(collection.GetAllHostsWithAssociatedData(request)), "application/json");
                 }
                 catch (Exception e)
                 {
@@ -217,11 +195,7 @@ namespace ComputerAnalytics
             }));
             server.AddRoute("POST", "/import", new Func<ServerRequest, bool>(request =>
             {
-                if (analyticsViewingAuthorization != null && analyticsViewingAuthorization.Invoke(request))
-                {
-                    request.Send403();
-                    return true;
-                }
+                if (IsNotLoggedIn(request)) return true;
                 try
                 {
                     List<AnalyticsData> datas = JsonSerializer.Deserialize<List<AnalyticsData>>(request.bodyString);
@@ -229,12 +203,12 @@ namespace ComputerAnalytics
                     int rejected = 0;
                     foreach(AnalyticsData analyticsData in datas)
                     {
-                        if (!database.Contains(analyticsData))
+                        if (!collection.Contains(analyticsData))
                         {
                             
                             try
                             {
-                                database.AddAnalyticData(AnalyticsData.ImportAnalyticsEntry(analyticsData));
+                                collection.AddAnalyticsToWebsite(AnalyticsData.ImportAnalyticsEntry(analyticsData));
                                 i++;
                             } catch (Exception e)
                             {
@@ -251,6 +225,77 @@ namespace ComputerAnalytics
                 }
                 return true;
             }));
+            server.AddRoute("GET", "/websites", new Func<ServerRequest, bool>(request =>
+            {
+                if(GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(JsonSerializer.Serialize(collection.config.Websites), "application/json");
+                return true;
+            }));
+            server.AddRoute("DELETE", "/website", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(collection.DeleteWebsite(request.bodyString));
+                return true;
+            }));
+            server.AddRoute("POST", "/website", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(collection.CreateWebsite(request.bodyString), "application/json");
+                return true;
+            }));
+            server.AddRoute("GET", "/manage", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(ReadResource("manage.html"), "text/html");
+                return true;
+            }));
+            server.AddRoute("GET", "/login", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString("True");
+                return true;
+            }));
+        }
+
+        public string GetToken(ServerRequest request)
+        {
+            Cookie token = request.cookies["token"];
+            if (token == null)
+            {
+                request.Send403();
+                return "";
+            }
+            return token.Value;
+        }
+
+        public bool IsNotLoggedIn(ServerRequest request)
+        {
+            if (!collection.DoesWebsiteWithPrivateTokenExist(GetToken(request)))
+            {
+                request.Send403();
+                return true;
+            }
+            return false;
         }
 
         public string ReadResource(string name)
@@ -270,6 +315,241 @@ namespace ComputerAnalytics
             {
                 return reader.ReadToEnd();
             }
+        }
+    }
+
+    class AnalyticsDatabaseCollection
+    {
+        public List<AnalyticsDatabase> databases { get; set; } = new List<AnalyticsDatabase>();
+        public Config config = new Config();
+        public string analyticsDir = "";
+
+        public void LoadAllDatabases(string analyticsDir = "analytics\\")
+        {
+            this.analyticsDir = analyticsDir;
+            Logger.Log("Loading all databases");
+            FileManager.CreateDirectoryIfNotExisting(analyticsDir);
+            if (!File.Exists(analyticsDir + "config.json")) SaveConfig();
+            config = JsonSerializer.Deserialize<Config>(File.ReadAllText(analyticsDir + "config.json"));
+            if (config.publicAddress == "") SetPublicAddress("http://localhost");
+            for(int i = 0; i < config.Websites.Count; i++)
+            {
+                AnalyticsDatabase database = new AnalyticsDatabase(analyticsDir + config.Websites[i].folder);
+                databases.Add(database);
+            }
+            Logger.Log("Loaded all databases");
+        }
+
+        public void SetPublicAddress(string newAddress)
+        {
+            config.publicAddress = newAddress;
+            SaveConfig();
+        }
+
+        public string GetPublicAddress()
+        {
+            return config.publicAddress;
+        }
+
+        public string GetPublicToken(string origin)
+        {
+            foreach(Website w in config.Websites)
+            {
+                if (w.url == origin) return w.publicToken;
+            }
+            return "";
+        }
+
+        public string CreateRandomToken()
+        {
+            string token = RandomExtension.CreateToken();
+            while(config.usedTokens.Contains(token))
+            {
+                token = RandomExtension.CreateToken();
+            }
+            config.usedTokens.Add(token);
+            return token;
+        }
+
+        public int GetDatabaseIndexWithPublicToken(string publicToken, string origin)
+        {
+            for (int i = 0; i < config.Websites.Count; i++)
+            {
+                if (config.Websites[i].publicToken == publicToken && config.Websites[i].url == origin)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        public int GetDatabaseIndexWithPublicToken(string publicToken)
+        {
+            for (int i = 0; i < config.Websites.Count; i++)
+            {
+                if (config.Websites[i].publicToken == publicToken)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        public int GetDatabaseIndexWithPrivateToken(string privateToken)
+        {
+            for (int i = 0; i < config.Websites.Count; i++)
+            {
+                if (config.Websites[i].privateToken == privateToken)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        public List<AnalyticsData> GetAnalyticsForWebsite(string privateToken)
+        {
+            for(int i = 0; i <config.Websites.Count; i++)
+            {
+                if(config.Websites[i].privateToken == privateToken)
+                {
+                    return databases[i].data;
+                }
+            }
+
+            throw new Exception("Website not registered");
+        }
+
+        public void AddAnalyticsToWebsite(string origin, AnalyticsData data)
+        {
+            int i = GetDatabaseIndexWithPublicToken(data.token, origin);
+            if (i == -1) throw new Exception("Website not registered");
+            databases[i].AddAnalyticData(data);
+            return;
+        }
+
+        public void AddAnalyticsToWebsite(AnalyticsData data)
+        {
+            int i = GetDatabaseIndexWithPublicToken(data.token);
+            if (i == -1) throw new Exception("Website not registered");
+            databases[i].AddAnalyticData(data);
+            return;
+        }
+
+        public bool Contains(AnalyticsData d)
+        {
+            int i = GetDatabaseIndexWithPublicToken(d.token);
+            if (i == -1) throw new Exception("Website not registered");
+
+            for (int ii = 0; ii < databases[i].data.Count; ii++)
+            {
+                if (d.Equals(databases[i].data[ii])) return true;
+            }
+            return false;
+        }
+
+        public string GetAllowedOrigin(string origin)
+        {
+            foreach(Website w in config.Websites)
+            {
+                if(w.url == origin) return w.url;
+            }
+            return "";
+        }
+
+        public string CreateWebsite(string host) // Host e. g. https://computerelite.github.io
+        {
+            Website website = new Website();
+            website.url = host;
+            website.publicToken = CreateRandomToken();
+            website.privateToken = CreateRandomToken();
+            website.folder = StringFormatter.FileNameSafe(host).Replace("https", "").Replace("http", "") + "\\";
+            if (Directory.Exists(analyticsDir + website.folder)) return "Website already exists";
+            AnalyticsDatabase database = new AnalyticsDatabase(analyticsDir + website.folder);
+            databases.Add(database);
+            config.Websites.Add(website);
+            SaveConfig();
+            return "Created " + website.url;
+        }
+
+        public string DeleteWebsite(string url)
+        {
+            for(int i = 0; i < config.Websites.Count; i++)
+            {
+                if(config.Websites[i].url == url)
+                {
+                    Directory.Delete(analyticsDir + config.Websites[i].folder, true);
+                    config.Websites.RemoveAt(i);
+                    SaveConfig();
+                    return "Deleted " + url + " including all Analytics";
+                }
+            }
+            return "Website not registered";
+        }
+
+        public void SaveConfig()
+        {
+            if(config.masterToken == "") config.masterToken = CreateRandomToken();
+            File.WriteAllText(analyticsDir + "config.json", JsonSerializer.Serialize(config));
+        }
+
+        public bool DoesWebsiteWithPublicTokenExist(string publicToken, string origin)
+        {
+            return GetDatabaseIndexWithPublicToken(publicToken, origin) != -1;
+        }
+
+        public bool DoesWebsiteWithPrivateTokenExist(string privateToken)
+        {
+            foreach (Website website in config.Websites)
+            {
+                if (website.privateToken == privateToken) return true;
+            }
+            return false;
+        }
+
+        public List<AnalyticsEndpoint> GetAllEndpointsWithAssociatedData(ServerRequest request)
+        {
+            string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
+            NameValueCollection queryString = request.queryString;
+            int i = GetDatabaseIndexWithPrivateToken(privateToken);
+            if(i == -1) return new List<AnalyticsEndpoint>();
+            return databases[i].GetAllEndpointsWithAssociatedData(null, queryString);
+        }
+
+        public List<AnalyticsHost> GetAllHostsWithAssociatedData(ServerRequest request)
+        {
+            string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
+            NameValueCollection queryString = request.queryString;
+            int i = GetDatabaseIndexWithPrivateToken(privateToken);
+            if (i == -1) return new List<AnalyticsHost>();
+            return databases[i].GetAllHostsWithAssociatedData(null, queryString);
+        }
+
+        public List<AnalyticsDate> GetAllEndpointsSortedByDateWithAssociatedData(ServerRequest request)
+        {
+            string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
+            NameValueCollection queryString = request.queryString;
+            int i = GetDatabaseIndexWithPrivateToken(privateToken);
+            if (i == -1) return new List<AnalyticsDate>();
+            return databases[i].GetAllEndpointsSortedByDateWithAssociatedData(null, queryString);
+        }
+
+        public List<AnalyticsReferrer> GetAllReferrersWithAssociatedData(ServerRequest request)
+        {
+            string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
+            NameValueCollection queryString = request.queryString;
+            int i = GetDatabaseIndexWithPrivateToken(privateToken);
+            if (i == -1) return new List<AnalyticsReferrer>();
+            return databases[i].GetAllReferrersWithAssociatedData(null, queryString);
+        }
+
+        public List<AnalyticsQueryString> GetAllQueryStringsWithAssociatedData(ServerRequest request)
+        {
+            string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
+            NameValueCollection queryString = request.queryString;
+            int i = GetDatabaseIndexWithPrivateToken(privateToken);
+            if (i == -1) return new List<AnalyticsQueryString>();
+            return databases[i].GetAllQueryStringsWithAssociatedData(null, queryString);
         }
     }
 
@@ -652,6 +932,7 @@ namespace ComputerAnalytics
         public long sideClose { get; set; } = 0; // unix
         public DateTime closeTime { get; set; } = DateTime.MinValue;
         public long duration { get; set; } = 0; // seconds
+        public string token { get; set; } = "";
         public string fileName { get; set; } = null;
 
         public override bool Equals(object obj)

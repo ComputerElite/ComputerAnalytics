@@ -1,0 +1,87 @@
+﻿<!DOCTYPE html>
+<html>
+    <head>
+        <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
+    <style>
+        body {
+            color: #EEEEEE;
+            background-color: #222222;
+            font-family: Open Sans;
+            width: 100%;
+        }
+
+        html {
+            width: 100%;
+        }
+
+        a {
+            text-decoration: none;
+            color: #30A2EC;
+        }
+
+        .customButton {
+            border: #111111 2px solid;
+            color: #EEEEEE;
+            background-color: #333333;
+            text-align: center;
+            padding: 5px;
+            width: fit-content;
+            height: fit-content;
+            cursor: pointer;
+            user-select: none;
+            transition: transform .1s;
+            margin: 10px;
+        }
+    </style>
+    </head>
+    <body>
+        <div style="display: flex; justify-content: center; flex-direction: column; align-items: center;">
+            <input type="text" id="name">
+            <div onclick="Create()" class="customButton">Add Website</div>
+            <h4>Websites</h4>
+            <div id="websites">
+
+            </div>
+        </div>
+        <script>
+            const websites = document.getElementById("websites")
+
+            function Delete(url) {
+                fetch("/website", {
+                    method: "DELETE",
+                    body: url
+                }).then(res => {
+                    res.text().then(t => {
+                        alert(t)
+                        location.reload()
+                    })
+                })
+            }
+            function Create() {
+                var url = document.getElementById("name").value
+                if(url.endsWith("/")) url = url.substring(0, url.length - 1)
+                fetch("/website", {
+                    method: "POST",
+                    body: url
+                }).then(res => {
+                    res.text().then(t => {
+                        alert(t)
+                        location.reload()
+                    })
+                })
+            }
+            fetch("/websites").then(res => {
+                res.json().then(w => {
+                    w.forEach(e => {
+                        websites.innerHTML +=  `<div style="display: flex; flex-direction: column; border: #EEEEEE 1px solid; width: 100%; padding: 15px;">
+                                                <a style="font-weight: bold;" href="${e.url}">${e.url}</a>
+                                                <div>public: ${e.publicToken}</div>
+                                                <div>private: ${e.privateToken}</div>
+                                                <div class="customButton" onclick="Delete('${e.url}')">Delete Website (not undoable)</div>
+                                            </div>`
+                    })
+                })
+            })
+        </script>
+    </body>
+</html>

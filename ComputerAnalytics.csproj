@@ -58,6 +58,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="AnalyticsConstants.cs" />
+    <Compile Include="Authentication.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
@@ -79,6 +80,12 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="analytics.html" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="login.html" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="manage.html" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

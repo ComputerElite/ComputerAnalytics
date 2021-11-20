@@ -1,0 +1,70 @@
+﻿<!DOCTYPE html>
+<html>
+    <head>
+        <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
+    <style>
+        body {
+            color: #EEEEEE;
+            background-color: #222222;
+            font-family: Open Sans;
+        }
+
+        a {
+            text-decoration: none;
+            color: #30A2EC;
+        }
+
+        .customButton {
+            border: #111111 2px solid;
+            color: #EEEEEE;
+            background-color: #333333;
+            text-align: center;
+            padding: 5px;
+            width: fit-content;
+            height: fit-content;
+            cursor: pointer;
+            user-select: none;
+            transition: transform .1s;
+        }
+    </style>
+    </head>
+    <body>
+        <div style="display: flex; justify-content: center; flex-direction: column; align-items: center;">
+            <h4>Enter private token</h4>
+            <input type="text" id="token" style="width: 200px;"></input>
+            <button class="customButton" style="margin-top: 10px;" onclick="Login()">Login</button>
+        </div>
+        <script>
+            function Login() {
+                SetCookie("token", document.getElementById("token").value, 1)
+                fetch("/login").then(res => {
+                    if(res.status == 200) window.location.href = "/manage"
+                    else window.location.href = "/analytics"
+                })
+            }
+               
+
+            function GetCookie(cookieName) {
+                var name = cookieName + "=";
+                var ca = document.cookie.split(';');
+                for (var i = 0; i < ca.length; i++) {
+                    var c = ca[i];
+                    while (c.charAt(0) == ' ') {
+                        c = c.substring(1);
+                    }
+                    if (c.indexOf(name) == 0) {
+                        return c.substring(name.length, c.length);
+                    }
+                }
+                return "";
+            }
+
+            function SetCookie(name, value, expiration) {
+                var d = new Date();
+                d.setTime(d.getTime() + (expiration * 24 * 60 * 60 * 1000));
+                var expires = "expires=" + d.toUTCString();
+                document.cookie = name + "=" + value + ";" + expires + ";path=/";
+            }
+        </script>
+    </body>
+</html>
