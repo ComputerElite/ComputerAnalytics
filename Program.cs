@@ -4,6 +4,7 @@ using ComputerUtils.VarUtils;
 using ComputerUtils.Webserver;
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -129,7 +130,7 @@ namespace ComputerAnalytics
                     string queryString = request.queryString.Get("querystring");
                     string referrer = request.queryString.Get("referrer");
                     string date = request.queryString.Get("date");
-                    request.SendString(JsonSerializer.Serialize(database.GetAllEndpointsWithAssociatedData(null, host, endpoint, queryString, referrer, date)), "application/json");
+                    request.SendString(JsonSerializer.Serialize(database.GetAllEndpointsWithAssociatedData(null, request.queryString)), "application/json");
                 } catch(Exception e)
                 {
                     Logger.Log("Error while crunching data:\n" + e.ToString(), LoggingType.Warning);
@@ -147,12 +148,7 @@ namespace ComputerAnalytics
                 }
                 try
                 {
-                    string host = request.queryString.Get("host");
-                    string endpoint = request.queryString.Get("endpoint");
-                    string queryString = request.queryString.Get("querystring");
-                    string referrer = request.queryString.Get("referrer");
-                    string date = request.queryString.Get("date");
-                    request.SendString(JsonSerializer.Serialize(database.GetAllEndpointsSortedByDateWithAssociatedData(null, host, endpoint, queryString, referrer, date)), "application/json");
+                    request.SendString(JsonSerializer.Serialize(database.GetAllEndpointsSortedByDateWithAssociatedData(null, request.queryString)), "application/json");
                 }
                 catch (Exception e)
                 {
@@ -171,12 +167,7 @@ namespace ComputerAnalytics
                 }
                 try
                 {
-                    string host = request.queryString.Get("host");
-                    string endpoint = request.queryString.Get("endpoint");
-                    string queryString = request.queryString.Get("querystring");
-                    string referrer = request.queryString.Get("referrer");
-                    string date = request.queryString.Get("date");
-                    request.SendString(JsonSerializer.Serialize(database.GetAllReferrersWithAssociatedData(null, host, endpoint, queryString, referrer, date)), "application/json");
+                    request.SendString(JsonSerializer.Serialize(database.GetAllReferrersWithAssociatedData(null, request.queryString)), "application/json");
                 }
                 catch (Exception e)
                 {
@@ -195,12 +186,7 @@ namespace ComputerAnalytics
                 }
                 try
                 {
-                    string host = request.queryString.Get("host");
-                    string endpoint = request.queryString.Get("endpoint");
-                    string queryString = request.queryString.Get("querystring");
-                    string referrer = request.queryString.Get("referrer");
-                    string date = request.queryString.Get("date");
-                    request.SendString(JsonSerializer.Serialize(database.GetAllQueryStringsWithAssociatedData(null, host, endpoint, queryString, referrer, date)), "application/json");
+                    request.SendString(JsonSerializer.Serialize(database.GetAllQueryStringsWithAssociatedData(null, request.queryString)), "application/json");
                 }
                 catch (Exception e)
                 {
@@ -219,12 +205,7 @@ namespace ComputerAnalytics
                 }
                 try
                 {
-                    string host = request.queryString.Get("host");
-                    string endpoint = request.queryString.Get("endpoint");
-                    string queryString = request.queryString.Get("querystring");
-                    string referrer = request.queryString.Get("referrer");
-                    string date = request.queryString.Get("date");
-                    request.SendString(JsonSerializer.Serialize(database.GetAllHostsWithAssociatedData(null, host, endpoint, queryString, referrer, date)), "application/json");
+                    request.SendString(JsonSerializer.Serialize(database.GetAllHostsWithAssociatedData(null, request.queryString)), "application/json");
                 }
                 catch (Exception e)
                 {
@@ -360,7 +341,7 @@ namespace ComputerAnalytics
             }
         }
 
-        public List<AnalyticsEndpoint> GetAllEndpointsWithAssociatedData(List<AnalyticsData> usedData = null, string host = null, string endpoint = null, string queryString = null, string referrer = null, string date = null)
+        public List<AnalyticsEndpoint> GetAllEndpointsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             if (usedData == null) usedData = data;
             Logger.Log("Crunching endpoints with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
@@ -368,7 +349,7 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsEndpoint> endpoints = new Dictionary<string, AnalyticsEndpoint>();
             for (int i = 0; i < usedData.Count; i++)
             {
-                if (IsNotValid(usedData[i], host, endpoint, queryString, referrer, date)) continue;
+                if (IsNotValid(usedData[i], queryString)) continue;
                 if (!endpoints.ContainsKey(usedData[i].endpoint))
                 {
                     endpoints.Add(usedData[i].endpoint, new AnalyticsEndpoint());
@@ -398,7 +379,7 @@ namespace ComputerAnalytics
             return endpointsL;
         }
 
-        public List<AnalyticsHost> GetAllHostsWithAssociatedData(List<AnalyticsData> usedData = null, string host = null, string endpoint = null, string queryString = null, string referrer = null, string date = null)
+        public List<AnalyticsHost> GetAllHostsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             if (usedData == null) usedData = data;
             Logger.Log("Crunching hosts with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
@@ -406,8 +387,7 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsHost> hosts = new Dictionary<string, AnalyticsHost>();
             for (int i = 0; i < usedData.Count; i++)
             {
-                if (IsNotValid(usedData[i], host, endpoint, queryString, referrer, date)) continue;
-                if (date != null && !date.Split(',').Contains(usedData[i].openTime.ToString("dd.MM.yyyy"))) continue;
+                if (IsNotValid(usedData[i], queryString)) continue;
                 if (!hosts.ContainsKey(usedData[i].host))
                 {
                     hosts.Add(usedData[i].host, new AnalyticsHost());
@@ -436,7 +416,7 @@ namespace ComputerAnalytics
             return hostsL;
         }
 
-        public List<AnalyticsDate> GetAllEndpointsSortedByDateWithAssociatedData(List<AnalyticsData> usedData = null, string host = null, string endpoint = null, string queryString = null, string referrer = null, string ddate = null)
+        public List<AnalyticsDate> GetAllEndpointsSortedByDateWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             if (usedData == null) usedData = data;
             Logger.Log("Crunching endpoints sorted by date with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
@@ -444,7 +424,7 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsDate> dates = new Dictionary<string, AnalyticsDate>();
             for(int i = 0; i < usedData.Count; i++)
             {
-                if (IsNotValid(usedData[i], host, endpoint, queryString, referrer, ddate)) continue;
+                if (IsNotValid(usedData[i], queryString)) continue;
                 string date = usedData[i].openTime.ToString("dd.MM.yyyy");
                 if(!dates.ContainsKey(date))
                 {
@@ -475,7 +455,7 @@ namespace ComputerAnalytics
             return datesL;
         }
 
-        public List<AnalyticsReferrer> GetAllReferrersWithAssociatedData(List<AnalyticsData> usedData = null, string host = null, string endpoint = null, string queryString = null, string referrer = null, string date = null)
+        public List<AnalyticsReferrer> GetAllReferrersWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             if (usedData == null) usedData = data;
             Logger.Log("Crunching referrers with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
@@ -483,7 +463,7 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsReferrer> referrers = new Dictionary<string, AnalyticsReferrer>();
             for (int i = 0; i < usedData.Count; i++)
             {
-                if (IsNotValid(usedData[i], host, endpoint, queryString, referrer, date)) continue;
+                if (IsNotValid(usedData[i], queryString)) continue;
                 if (!referrers.ContainsKey(usedData[i].referrer))
                 {
                     referrers.Add(usedData[i].referrer, new AnalyticsReferrer(usedData[i].referrer));
@@ -504,17 +484,18 @@ namespace ComputerAnalytics
             return referrersL;
         }
 
-        public bool IsNotValid(AnalyticsData d, string host = null, string endpoint = null, string queryString = null, string referrer = null, string date = null)
+        public bool IsNotValid(AnalyticsData d, NameValueCollection queryString)
         {
-            if (host != null && d.host != host) return true;
-            if (endpoint != null && d.endpoint != endpoint) return true;
-            if (queryString != null && d.queryString != queryString) return true;
-            if (referrer != null && d.referrer != referrer) return true;
-            if (date != null && !date.Split(',').Contains(d.openTime.ToString("dd.MM.yyyy"))) return true;
+            if (queryString == null) return false;
+            if (queryString.Get("host") != null && d.host != queryString.Get("host")) return true;
+            if (queryString.Get("endpoint") != null && d.endpoint != queryString.Get("endpoint")) return true;
+            if (queryString.Get("querystring") != null && d.queryString != queryString.Get("querystring")) return true;
+            if (queryString.Get("referrer") != null && d.referrer != queryString.Get("referrer")) return true;
+            if (queryString.Get("date") != null && !queryString.Get("date").Split(',').Contains(d.openTime.ToString("dd.MM.yyyy"))) return true;
             return false;
         }
 
-        public List<AnalyticsQueryString> GetAllQueryStringsWithAssociatedData(List<AnalyticsData> usedData = null, string host = null, string endpoint = null, string queryString = null, string referrer = null, string date = null)
+        public List<AnalyticsQueryString> GetAllQueryStringsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             if (usedData == null) usedData = data;
             Logger.Log("Crunching QueryStrings with all data for " + usedData.Count + " analytics just for a really idiotic idiot");
@@ -522,7 +503,7 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsQueryString> queryStrings = new Dictionary<string, AnalyticsQueryString>();
             for (int i = 0; i < usedData.Count; i++)
             {
-                if (IsNotValid(usedData[i], host, endpoint, queryString, referrer, date)) continue;
+                if (IsNotValid(usedData[i], queryString)) continue;
                 if (!queryStrings.ContainsKey(usedData[i].queryString))
                 {
                     queryStrings.Add(usedData[i].queryString, new AnalyticsQueryString(usedData[i].queryString));
