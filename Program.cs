@@ -557,6 +557,11 @@ namespace ComputerAnalytics
                 request.SendString(collection.SetWebhook(request.queryString.Get("url"), request.bodyString));
                 return true;
             }));
+            server.AddRoute("GET", "/privacy", new Func<ServerRequest, bool>(request =>
+            {
+                request.Redirect("https://github.com/ComputerElite/ComputerAnalytics/wiki");
+                return true;
+            }));
         }
 
         public string GetToken(ServerRequest request)
