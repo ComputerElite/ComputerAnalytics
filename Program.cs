@@ -1,4 +1,5 @@
-﻿using ComputerUtils.FileManaging;
+﻿using ComputerUtils.Discord;
+using ComputerUtils.FileManaging;
 using ComputerUtils.Logging;
 using ComputerUtils.RandomExtensions;
 using ComputerUtils.StringFormatters;
@@ -74,6 +75,65 @@ namespace ComputerAnalytics
             collection.LoadAllDatabases();
             this.server = httpServer;
             server.StartServer(collection.config.port);
+            Thread warningSystemsAndSiteMetrics = new Thread(() =>
+            {
+                int iteration = 0;
+                TimeSpan waiting = new TimeSpan(24, 0, 0);
+                while (true)
+                {
+                    if (iteration == 1)
+                    {
+                        try
+                        {
+                            double sleep = (waiting - (DateTime.Now - collection.config.lastWebhookUpdate)).TotalMinutes;
+                            collection.config.lastWebhookUpdate = DateTime.Now;
+                            collection.SaveConfig();
+                            Logger.Log("Warning Systems and Site metrics waiting " + sleep + " minutes until next execution");
+                            Thread.Sleep(sleep <= 0 ? 0 : (int)Math.Round(sleep * 60 * 1000));
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Log("Error while waiting: " + ex.ToString(), LoggingType.Warning);
+                        }
+                        if (collection.config.masterDiscordWebhookUrl != "")
+                        {
+                            try
+                            {
+                                Logger.Log("Sending master webhook");
+                                DiscordWebhook webhook = new DiscordWebhook(collection.config.masterDiscordWebhookUrl);
+                                webhook.SendEmbed("ComputerAnalytics metrics report", "__**Those metrics are for the last " + (DateTime.Now - collection.config.lastWebhookUpdate).TotalHours + " hours**__\n\n**Analytics recieved:** `" + collection.config.recievedAnalytics + "`\n**Rejected Analytics:** `" + collection.config.rejectedAnalytics + "`\n**Current Ram usage:**`" + SizeConverter.ByteSizeToString(Process.GetCurrentProcess().WorkingSet64) + "`\n\n_Next update in approximately " + waiting.TotalHours + " hours_", "master " + DateTime.Now, "ComputerAnalytics", "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), 0x1CAD15);
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.Log("Exception while sending webhook" + ex.ToString(), LoggingType.Warning);
+                            }
+                        }
+                        collection.config.recievedAnalytics = 0;
+                        collection.config.rejectedAnalytics = 0;
+                        for (int i = 0; i < collection.config.Websites.Count; i++)
+                        {
+                            Website w = collection.config.Websites[i];
+                            if (w.discordWebhookUrl != "")
+                            {
+                                try
+                                {
+                                    Logger.Log("Sending webhook for " + w.url);
+                                    DiscordWebhook webhook = new DiscordWebhook(w.discordWebhookUrl);
+                                    webhook.SendEmbed("Site metrics report", "__**Those metrics are for the last " + (DateTime.Now - w.lastWebhookUpdate).TotalHours + " hours**__\n\n**Site clicks:** `" + w.siteClicks + "`\n_If you want more details check the analytics page_\n\n_Next update in approximately " + waiting.TotalHours + " hours_", w.url + " " + DateTime.Now, "ComputerAnalytics", "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), 0x1CAD15);
+                                } catch (Exception ex)
+                                {
+                                    Logger.Log("Exception while sending webhook" + ex.ToString(), LoggingType.Warning);
+                                }
+                                collection.config.Websites[i].lastWebhookUpdate = DateTime.Now;
+                            }
+                            collection.config.Websites[i].siteClicks = 0;
+                        }
+                        iteration = -1;
+                    }
+                    iteration++;
+                }
+            });
+            warningSystemsAndSiteMetrics.Start();
             /*
             if (serverUris == null) serverUris = new List<string>();
             foreach(string prefix in server.GetPrefixes())
@@ -95,8 +155,10 @@ namespace ComputerAnalytics
                 try
                 {
                     data = AnalyticsData.Recieve(request);
+                    collection.config.recievedAnalytics++;
                 } catch(Exception e)
                 {
+                    collection.config.rejectedAnalytics++;
                     Logger.Log("Error while recieving analytics json:\n" + e.ToString(), LoggingType.Warning);
                     request.SendString(new AnalyticsResponse("error", e.Message).ToString(), "application/json", 500, true, new Dictionary<string, string>() { { "Access-Control-Allow-Origin", origin }, { "Access-Control-Allow-Credentials", "true" } });
                     return true;
@@ -357,7 +419,18 @@ namespace ComputerAnalytics
                 Process currentProcess = Process.GetCurrentProcess();
                 m.ramUsage = currentProcess.WorkingSet64;
                 m.ramUsageString = SizeConverter.ByteSizeToString(m.ramUsage);
+                m.workingDirectory = AppDomain.CurrentDomain.BaseDirectory;
                 request.SendString(JsonSerializer.Serialize(m), "application/json");
+                return true;
+            }));
+            server.AddRoute("GET", "/test", new Func<ServerRequest, bool>(request =>
+            {
+                string s = "";
+                foreach(string header in request.context.Request.Headers.AllKeys)
+                {
+                    s += header + ": " + request.context.Request.Headers[header] + "  <br>";
+                }
+                request.SendString(s, "text/html");
                 return true;
             }));
             server.AddRoute("POST", "/update", new Func<ServerRequest, bool>(request =>
@@ -384,6 +457,104 @@ namespace ComputerAnalytics
                 };
                 Process.Start(i);
                 Environment.Exit(0);
+                return true;
+            }));
+            server.AddRoute("GET", "/console", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                Logger.saveOutputInVariable = true;
+                request.SendString(ReadResource("console.html"), "text/html");
+                return true;
+            }));
+            server.AddRoute("GET", "/consoleoutput", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(Logger.log);
+                return true;
+            }));
+            server.AddRoute("POST", "/restart", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString("Restarting");
+                ProcessStartInfo i = new ProcessStartInfo
+                {
+                    Arguments = "\"" + AppDomain.CurrentDomain.BaseDirectory + "ComputerAnalytics.dll\"",
+                    UseShellExecute = true,
+                    FileName = "dotnet"
+                };
+                Process.Start(i);
+                Environment.Exit(0);
+                return true;
+            }));
+            server.AddRoute("POST", "/shutdown", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString("Shutting down");
+                Environment.Exit(0);
+                return true;
+            }));
+            server.AddRoute("GET", "/script.js", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken && IsNotLoggedIn(request))
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(ReadResource("script.js"), "application/javascript");
+                return true;
+            }));
+            server.AddRoute("GET", "/style.css", new Func<ServerRequest, bool>(request =>
+            {
+                request.SendString(ReadResource("style.css"), "text/css");
+                return true;
+            }));
+            server.AddRoute("POST", "/masterwebhook", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                collection.config.masterDiscordWebhookUrl = request.bodyString;
+                collection.SaveConfig();
+                request.SendString("Set masterwebhook");
+                return true;
+            }));
+            server.AddRoute("GET", "/masterwebhook", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(collection.config.masterDiscordWebhookUrl);
+                return true;
+            }));
+            server.AddRoute("POST", "/webhook", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                collection.SaveConfig();
+                request.SendString(collection.SetWebhook(request.queryString.Get("url"), request.bodyString));
                 return true;
             }));
         }
@@ -529,23 +700,11 @@ namespace ComputerAnalytics
             return -1;
         }
 
-        public List<AnalyticsData> GetAnalyticsForWebsite(string privateToken)
-        {
-            for(int i = 0; i <config.Websites.Count; i++)
-            {
-                if(config.Websites[i].privateToken == privateToken)
-                {
-                    return databases[i].data;
-                }
-            }
-
-            throw new Exception("Website not registered");
-        }
-
         public void AddAnalyticsToWebsite(string origin, AnalyticsData data)
         {
             int i = GetDatabaseIndexWithPublicToken(data.token, origin);
             if (i == -1) throw new Exception("Website not registered");
+            config.Websites[i].siteClicks++;
             databases[i].AddAnalyticData(data);
             return;
         }
@@ -563,9 +722,9 @@ namespace ComputerAnalytics
             int i = GetDatabaseIndexWithPublicToken(d.token);
             if (i == -1) throw new Exception("Website not registered");
 
-            for (int ii = 0; ii < databases[i].data.Count; ii++)
+            foreach(string s in Directory.EnumerateFiles(databases[i].analyticsDirectory))
             {
-                if (d.Equals(databases[i].data[ii])) return true;
+                if (d.Equals(AnalyticsData.Load(s))) return true;
             }
             return false;
         }
@@ -577,6 +736,20 @@ namespace ComputerAnalytics
                 if(w.url == origin) return w.url;
             }
             return "";
+        }
+
+        public string SetWebhook(string url, string webhookUrl)
+        {
+            for(int i = 0; i < config.Websites.Count; i++)
+            {
+                if(config.Websites[i].url == url)
+                {
+                    config.Websites[i].discordWebhookUrl = webhookUrl;
+                    SaveConfig();
+                    return "Set webhook for " + url;
+                }
+            }
+            return "url does not exist";
         }
 
         public string CreateWebsite(string host) // Host e. g. https://computerelite.github.io
@@ -650,6 +823,7 @@ namespace ComputerAnalytics
             NameValueCollection queryString = request.queryString;
             int i = GetDatabaseIndexWithPrivateToken(privateToken);
             if(i == -1) return new List<AnalyticsEndpoint>();
+            Logger.Log("Crunching Endpoints of database for " + config.Websites[i].url + " just because some idiot needs them");
             return databases[i].GetAllEndpointsWithAssociatedData(null, queryString);
         }
 
@@ -659,6 +833,7 @@ namespace ComputerAnalytics
             NameValueCollection queryString = request.queryString;
             int i = GetDatabaseIndexWithPrivateToken(privateToken);
             if (i == -1) return new List<AnalyticsHost>();
+            Logger.Log("Crunching Hosts of database for " + config.Websites[i].url + " just because they were requested by some ugly guy");
             return databases[i].GetAllHostsWithAssociatedData(null, queryString);
         }
 
@@ -668,6 +843,7 @@ namespace ComputerAnalytics
             NameValueCollection queryString = request.queryString;
             int i = GetDatabaseIndexWithPrivateToken(privateToken);
             if (i == -1) return new List<AnalyticsDate>();
+            Logger.Log("Crunching Endpoints Sorted by data of database for " + config.Websites[i].url + " just because of DN");
             return databases[i].GetAllEndpointsSortedByDateWithAssociatedData(null, queryString);
         }
 
@@ -677,6 +853,7 @@ namespace ComputerAnalytics
             NameValueCollection queryString = request.queryString;
             int i = GetDatabaseIndexWithPrivateToken(privateToken);
             if (i == -1) return new List<AnalyticsReferrer>();
+            Logger.Log("Crunching Referrers of database for " + config.Websites[i].url + " just because of IsPinkCute == true");
             return databases[i].GetAllReferrersWithAssociatedData(null, queryString);
         }
 
@@ -686,14 +863,15 @@ namespace ComputerAnalytics
             NameValueCollection queryString = request.queryString;
             int i = GetDatabaseIndexWithPrivateToken(privateToken);
             if (i == -1) return new List<AnalyticsQueryString>();
+            Logger.Log("Crunching QueryStrings of database for " + config.Websites[i].url + " just because I can do it :sunglasses:");
             return databases[i].GetAllQueryStringsWithAssociatedData(null, queryString);
         }
     }
 
     class AnalyticsDatabase
     {
-        public static string analyticsDirectory { get; set; } = "analytics" + Path.DirectorySeparatorChar;
-        public List<AnalyticsData> data { get; set; } = new List<AnalyticsData>();
+        public string analyticsDirectory { get; set; } = "analytics" + Path.DirectorySeparatorChar;
+        //public List<AnalyticsData> data { get; set; } = new List<AnalyticsData>();
 
         public AnalyticsDatabase(string analyticsDir = "analytics")
         {
@@ -705,85 +883,67 @@ namespace ComputerAnalytics
             analyticsDirectory = analyticsDir;
             FileManager.CreateDirectoryIfNotExisting(analyticsDirectory);
             string[] files = Directory.GetFiles(analyticsDirectory);
-            for (int i = 0; i < files.Length; i++)
-            {
-                try
-                {
-                    data.Add(AnalyticsData.Load(files[i]));
-                } catch(Exception e)
-                {
-                    Logger.Log("Analytics file " + files[i] + " failed to load:\n" + e.ToString(), LoggingType.Warning);
-                }
-            }
             stopwatch.Stop();
-            Logger.Log("Loading Analytics Database with " + data.Count + " entries took " + stopwatch.Elapsed);
             Logger.displayLogInConsole = log;
-        }
-
-        public bool Contains(AnalyticsData d)
-        {
-            for(int i = 0; i < data.Count; i++)
-            {
-                if (d.Equals(data[i])) return true;
-            }
-            return false;
         }
 
         public void AddAnalyticData(AnalyticsData analyticsData)
         {
-            data.Add(analyticsData);
             File.WriteAllText(analyticsDirectory + analyticsData.fileName, analyticsData.ToString());
         }
 
         public void DeleteOldAnalytics(TimeSpan maxTime)
         {
             DateTime now = DateTime.Now;
-            int deleted = 0;
-            for(int i = 0; i < data.Count; i++)
+            List<string> toDelete = new List<string>();
+            foreach(string f in Directory.EnumerateFiles(analyticsDirectory))
+            {
+                AnalyticsData data = AnalyticsData.Load(f);
+                if (now - data.openTime > maxTime)
+                {
+                    
+                    toDelete.Add(analyticsDirectory + data.fileName + data.fileName);
+                }
+                
+            }
+            for(int i = 0; i < toDelete.Count; i++)
             {
                 try
                 {
-                    if (now - data[i - deleted].openTime > maxTime)
-                    {
-                        Logger.Log("Deleting" + data[i - deleted].fileName);
-                        File.Delete(analyticsDirectory + data[i - deleted].fileName);
-                        data.RemoveAt(i - deleted);
-                        deleted++;
-
-                    }
+                    Logger.Log("Deleting" + toDelete[i]);
+                    File.Delete(toDelete[i]);
                 } catch (Exception e)
                 {
                     Logger.Log("Analytics file failed to delete while cleanup:\n" + e.ToString(), LoggingType.Warning);
                 }
-                
             }
         }
 
-        public List<AnalyticsEndpoint> GetAllEndpointsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsEndpoint> GetAllEndpointsWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
         {
-            if (usedData == null) usedData = data;
-            Logger.Log("Crunching endpoints with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
-            Stopwatch s = Stopwatch.StartNew();
+            //Logger.Log("Crunching endpoints with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
+            //Stopwatch s = Stopwatch.StartNew();
             Dictionary<string, AnalyticsEndpoint> endpoints = new Dictionary<string, AnalyticsEndpoint>();
-            for (int i = 0; i < usedData.Count; i++)
+            foreach(string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
-                if (IsNotValid(usedData[i], queryString)) continue;
-                if (!endpoints.ContainsKey(usedData[i].endpoint))
+                AnalyticsData data = AnalyticsData.Load(f);
+                if (IsNotValid(data, queryString)) continue;
+                if (!endpoints.ContainsKey(data.endpoint))
                 {
-                    endpoints.Add(usedData[i].endpoint, new AnalyticsEndpoint());
-                    endpoints[usedData[i].endpoint].endpoint = usedData[i].endpoint;
-                    endpoints[usedData[i].endpoint].host = usedData[i].host;
-                    endpoints[usedData[i].endpoint].fullUri = usedData[i].fullUri.Split('?')[0];
+                    endpoints.Add(data.endpoint, new AnalyticsEndpoint());
+                    endpoints[data.endpoint].endpoint = data.endpoint;
+                    endpoints[data.endpoint].host = data.host;
+                    endpoints[data.endpoint].fullUri = data.fullUri.Split('?')[0];
                 }
-                endpoints[usedData[i].endpoint].clicks++;
-                endpoints[usedData[i].endpoint].totalDuration += usedData[i].duration;
-                if(endpoints[usedData[i].endpoint].maxDuration < usedData[i].duration) endpoints[usedData[i].endpoint].maxDuration = usedData[i].duration;
-                if (endpoints[usedData[i].endpoint].minDuration > usedData[i].duration) endpoints[usedData[i].endpoint].minDuration = usedData[i].duration;
-                endpoints[usedData[i].endpoint].data.Add(usedData[i]);
-                if (!endpoints[usedData[i].endpoint].ips.Contains(usedData[i].remote))
+                endpoints[data.endpoint].clicks++;
+                endpoints[data.endpoint].totalDuration += data.duration;
+                if (endpoints[data.endpoint].maxDuration < data.duration) endpoints[data.endpoint].maxDuration = data.duration;
+                if (endpoints[data.endpoint].minDuration > data.duration) endpoints[data.endpoint].minDuration = data.duration;
+                endpoints[data.endpoint].data.Add(f);
+                if (!endpoints[data.endpoint].ips.Contains(data.remote))
                 {
-                    endpoints[usedData[i].endpoint].uniqueIPs++;
-                    endpoints[usedData[i].endpoint].ips.Add(usedData[i].remote);
+                    endpoints[data.endpoint].uniqueIPs++;
+                    endpoints[data.endpoint].ips.Add(data.remote);
                 }
             }
             List<AnalyticsEndpoint> endpointsL = endpoints.Values.ToList();
@@ -793,33 +953,33 @@ namespace ComputerAnalytics
                 e.referrers = GetAllReferrersWithAssociatedData(e.data);
                 e.queryStrings = GetAllQueryStringsWithAssociatedData(e.data);
             }));
-            Logger.Log("Crunching of endpoints with all data took " + s.ElapsedMilliseconds + " ms");
+            //Logger.Log("Crunching of endpoints with all data took " + s.ElapsedMilliseconds + " ms");
             return endpointsL;
         }
 
-        public List<AnalyticsHost> GetAllHostsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsHost> GetAllHostsWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
         {
-            if (usedData == null) usedData = data;
-            Logger.Log("Crunching hosts with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
-            Stopwatch s = Stopwatch.StartNew();
+            //Logger.Log("Crunching hosts with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
+            //Stopwatch s = Stopwatch.StartNew();
             Dictionary<string, AnalyticsHost> hosts = new Dictionary<string, AnalyticsHost>();
-            for (int i = 0; i < usedData.Count; i++)
+            foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
-                if (IsNotValid(usedData[i], queryString)) continue;
-                if (!hosts.ContainsKey(usedData[i].host))
+                AnalyticsData data = AnalyticsData.Load(f);
+                if (IsNotValid(data, queryString)) continue;
+                if (!hosts.ContainsKey(data.host))
                 {
-                    hosts.Add(usedData[i].host, new AnalyticsHost());
-                    hosts[usedData[i].host].host = usedData[i].host;
+                    hosts.Add(data.host, new AnalyticsHost());
+                    hosts[data.host].host = data.host;
                 }
-                hosts[usedData[i].host].totalClicks++;
-                hosts[usedData[i].host].data.Add(usedData[i]);
-                hosts[usedData[i].host].totalDuration += usedData[i].duration;
-                if (hosts[usedData[i].host].maxDuration < usedData[i].duration) hosts[usedData[i].host].maxDuration = usedData[i].duration;
-                if (hosts[usedData[i].host].minDuration > usedData[i].duration) hosts[usedData[i].host].minDuration = usedData[i].duration;
-                if (!hosts[usedData[i].host].ips.Contains(usedData[i].remote))
+                hosts[data.host].totalClicks++;
+                hosts[data.host].data.Add(f);
+                hosts[data.host].totalDuration += data.duration;
+                if (hosts[data.host].maxDuration < data.duration) hosts[data.host].maxDuration = data.duration;
+                if (hosts[data.host].minDuration > data.duration) hosts[data.host].minDuration = data.duration;
+                if (!hosts[data.host].ips.Contains(data.remote))
                 {
-                    hosts[usedData[i].host].totalUniqueIPs++;
-                    hosts[usedData[i].host].ips.Add(usedData[i].remote);
+                    hosts[data.host].totalUniqueIPs++;
+                    hosts[data.host].ips.Add(data.remote);
                 }
             }
             
@@ -830,35 +990,35 @@ namespace ComputerAnalytics
                 h.referrers = GetAllReferrersWithAssociatedData(h.data);
                 h.queryStrings = GetAllQueryStringsWithAssociatedData(h.data);
             }));
-            Logger.Log("Crunching of hosts with all data took " + s.ElapsedMilliseconds + " ms");
+            //Logger.Log("Crunching of hosts with all data took " + s.ElapsedMilliseconds + " ms");
             return hostsL;
         }
 
-        public List<AnalyticsDate> GetAllEndpointsSortedByDateWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsDate> GetAllEndpointsSortedByDateWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
         {
-            if (usedData == null) usedData = data;
-            Logger.Log("Crunching endpoints sorted by date with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
-            Stopwatch s = Stopwatch.StartNew();
+            //Logger.Log("Crunching endpoints sorted by date with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
+            //Stopwatch s = Stopwatch.StartNew();
             Dictionary<string, AnalyticsDate> dates = new Dictionary<string, AnalyticsDate>();
-            for(int i = 0; i < usedData.Count; i++)
+            foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
-                if (IsNotValid(usedData[i], queryString)) continue;
-                string date = usedData[i].openTime.ToString("dd.MM.yyyy");
+                AnalyticsData data = AnalyticsData.Load(f);
+                if (IsNotValid(data, queryString)) continue;
+                string date = data.openTime.ToString("dd.MM.yyyy");
                 if(!dates.ContainsKey(date))
                 {
                     dates.Add(date, new AnalyticsDate());
                     dates[date].date = date;
-                    dates[date].unix = ((DateTimeOffset)new DateTime(usedData[i].openTime.Year, usedData[i].openTime.Month, usedData[i].openTime.Day)).ToUnixTimeSeconds();
+                    dates[date].unix = ((DateTimeOffset)new DateTime(data.openTime.Year, data.openTime.Month, data.openTime.Day)).ToUnixTimeSeconds();
                 }
                 dates[date].totalClicks++;
-                dates[date].data.Add(usedData[i]);
-                dates[date].totalDuration += usedData[i].duration;
-                if (dates[date].maxDuration < usedData[i].duration) dates[date].maxDuration = usedData[i].duration;
-                if (dates[date].minDuration > usedData[i].duration) dates[date].minDuration = usedData[i].duration;
-                if (!dates[date].ips.Contains(usedData[i].remote))
+                dates[date].data.Add(f);
+                dates[date].totalDuration += data.duration;
+                if (dates[date].maxDuration < data.duration) dates[date].maxDuration = data.duration;
+                if (dates[date].minDuration > data.duration) dates[date].minDuration = data.duration;
+                if (!dates[date].ips.Contains(data.remote))
                 {
                     dates[date].totalUniqueIPs++;
-                    dates[date].ips.Add(usedData[i].remote);
+                    dates[date].ips.Add(data.remote);
                 }
             }
             dates = Sorter.Sort(dates);
@@ -869,36 +1029,36 @@ namespace ComputerAnalytics
                 d.referrers = GetAllReferrersWithAssociatedData(d.data);
                 d.queryStrings = GetAllQueryStringsWithAssociatedData(d.data);
             }));
-            Logger.Log("Crunching of endpoints sorted by date with all data took " + s.ElapsedMilliseconds + " ms");
+            //Logger.Log("Crunching of endpoints sorted by date with all data took " + s.ElapsedMilliseconds + " ms");
             return datesL;
         }
 
-        public List<AnalyticsReferrer> GetAllReferrersWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsReferrer> GetAllReferrersWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
         {
-            if (usedData == null) usedData = data;
-            Logger.Log("Crunching referrers with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
-            Stopwatch s = Stopwatch.StartNew();
+            //Logger.Log("Crunching referrers with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
+            //Stopwatch s = Stopwatch.StartNew();
             Dictionary<string, AnalyticsReferrer> referrers = new Dictionary<string, AnalyticsReferrer>();
-            for (int i = 0; i < usedData.Count; i++)
+            foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
-                if (IsNotValid(usedData[i], queryString)) continue;
-                if (!referrers.ContainsKey(usedData[i].referrer))
+                AnalyticsData data = AnalyticsData.Load(f);
+                if (IsNotValid(data, queryString)) continue;
+                if (!referrers.ContainsKey(data.referrer))
                 {
-                    referrers.Add(usedData[i].referrer, new AnalyticsReferrer(usedData[i].referrer));
+                    referrers.Add(data.referrer, new AnalyticsReferrer(data.referrer));
                 }
-                referrers[usedData[i].referrer].referred++;
-                referrers[usedData[i].referrer].totalDuration += usedData[i].duration;
-                if (referrers[usedData[i].referrer].maxDuration < usedData[i].duration) referrers[usedData[i].referrer].maxDuration = usedData[i].duration;
-                if (referrers[usedData[i].referrer].minDuration > usedData[i].duration) referrers[usedData[i].referrer].minDuration = usedData[i].duration;
-                if (!referrers[usedData[i].referrer].ips.Contains(usedData[i].remote))
+                referrers[data.referrer].referred++;
+                referrers[data.referrer].totalDuration += data.duration;
+                if (referrers[data.referrer].maxDuration < data.duration) referrers[data.referrer].maxDuration = data.duration;
+                if (referrers[data.referrer].minDuration > data.duration) referrers[data.referrer].minDuration = data.duration;
+                if (!referrers[data.referrer].ips.Contains(data.remote))
                 {
-                    referrers[usedData[i].referrer].uniqueIPs++;
-                    referrers[usedData[i].referrer].ips.Add(usedData[i].remote);
+                    referrers[data.referrer].uniqueIPs++;
+                    referrers[data.referrer].ips.Add(data.remote);
                 }
             }
             List<AnalyticsReferrer> referrersL = referrers.Values.ToList();
             referrersL.ForEach(new Action<AnalyticsReferrer>(e => e.avgDuration = e.totalDuration / (double)e.referred));
-            Logger.Log("Crunching of referrers with all data took " + s.ElapsedMilliseconds + " ms");
+            //Logger.Log("Crunching of referrers with all data took " + s.ElapsedMilliseconds + " ms");
             return referrersL;
         }
 
@@ -913,28 +1073,28 @@ namespace ComputerAnalytics
             return false;
         }
 
-        public List<AnalyticsQueryString> GetAllQueryStringsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsQueryString> GetAllQueryStringsWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
         {
-            if (usedData == null) usedData = data;
-            Logger.Log("Crunching QueryStrings with all data for " + usedData.Count + " analytics just for a really idiotic idiot");
-            Stopwatch s = Stopwatch.StartNew();
+            //Logger.Log("Crunching QueryStrings with all data for " + usedData.Count + " analytics just for a really idiotic idiot");
+            //Stopwatch s = Stopwatch.StartNew();
             Dictionary<string, AnalyticsQueryString> queryStrings = new Dictionary<string, AnalyticsQueryString>();
-            for (int i = 0; i < usedData.Count; i++)
+            foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
-                if (IsNotValid(usedData[i], queryString)) continue;
-                if (!queryStrings.ContainsKey(usedData[i].queryString))
+                AnalyticsData data = AnalyticsData.Load(f);
+                if (IsNotValid(data, queryString)) continue;
+                if (!queryStrings.ContainsKey(data.queryString))
                 {
-                    queryStrings.Add(usedData[i].queryString, new AnalyticsQueryString(usedData[i].queryString));
+                    queryStrings.Add(data.queryString, new AnalyticsQueryString(data.queryString));
                 }
-                queryStrings[usedData[i].queryString].totalClicks++;
-                if(!queryStrings[usedData[i].queryString].fullUris.Contains(usedData[i].fullUri)) queryStrings[usedData[i].queryString].fullUris.Add(usedData[i].fullUri);
-                queryStrings[usedData[i].queryString].totalDuration += usedData[i].duration;
-                if (queryStrings[usedData[i].queryString].maxDuration < usedData[i].duration) queryStrings[usedData[i].queryString].maxDuration = usedData[i].duration;
-                if (queryStrings[usedData[i].queryString].minDuration > usedData[i].duration) queryStrings[usedData[i].queryString].minDuration = usedData[i].duration;
-                if (!queryStrings[usedData[i].queryString].ips.Contains(usedData[i].remote))
+                queryStrings[data.queryString].totalClicks++;
+                if(!queryStrings[data.queryString].fullUris.Contains(data.fullUri)) queryStrings[data.queryString].fullUris.Add(data.fullUri);
+                queryStrings[data.queryString].totalDuration += data.duration;
+                if (queryStrings[data.queryString].maxDuration < data.duration) queryStrings[data.queryString].maxDuration = data.duration;
+                if (queryStrings[data.queryString].minDuration > data.duration) queryStrings[data.queryString].minDuration = data.duration;
+                if (!queryStrings[data.queryString].ips.Contains(data.remote))
                 {
-                    queryStrings[usedData[i].queryString].totalUniqueIPs++;
-                    queryStrings[usedData[i].queryString].ips.Add(usedData[i].remote);
+                    queryStrings[data.queryString].totalUniqueIPs++;
+                    queryStrings[data.queryString].ips.Add(data.remote);
                 }
             }
             List<AnalyticsQueryString> queryStringsL = queryStrings.Values.ToList();
@@ -943,7 +1103,7 @@ namespace ComputerAnalytics
                 q.avgDuration = q.totalDuration / (double)q.totalClicks;
                 q.referrers = GetAllReferrersWithAssociatedData(q.data);
             }));
-            Logger.Log("Crunching of QueryStrings with all data took " + s.ElapsedMilliseconds + " ms");
+            //Logger.Log("Crunching of QueryStrings with all data took " + s.ElapsedMilliseconds + " ms");
             return queryStringsL;
         }
     }
@@ -961,7 +1121,7 @@ namespace ComputerAnalytics
         public List<AnalyticsQueryString> queryStrings { get; set; } = new List<AnalyticsQueryString>();
         public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
         public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<AnalyticsData> data = new List<AnalyticsData>();
+        public List<string> data = new List<string>();
         public List<string> ips = new List<string>();
     }
 
@@ -996,7 +1156,7 @@ namespace ComputerAnalytics
         public List<AnalyticsQueryString> queryStrings { get; set; }  = new List<AnalyticsQueryString>();
         public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
         public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<AnalyticsData> data = new List<AnalyticsData>();
+        public List<string> data = new List<string>();
         public List<string> ips = new List<string>();
     }
 
@@ -1009,7 +1169,7 @@ namespace ComputerAnalytics
         public double avgDuration { get; set; } = 0.0;
         public long totalDuration { get; set; } = 0;
         public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<AnalyticsData> data = new List<AnalyticsData>();
+        public List<string> data = new List<string>();
         public List<string> ips = new List<string>();
         public string queryString { get; set; } = "";
         public List<string> fullUris { get; set; } = new List<string>();
@@ -1034,7 +1194,7 @@ namespace ComputerAnalytics
 
         public List<AnalyticsQueryString> queryStrings { get; set; } = new List<AnalyticsQueryString>();
         public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<AnalyticsData> data = new List<AnalyticsData>();
+        public List<string> data = new List<string>();
         public List<string> ips = new List<string>();
     }
 
@@ -1072,6 +1232,8 @@ namespace ComputerAnalytics
         public long duration { get; set; } = 0; // seconds
         public string token { get; set; } = "";
         public string fileName { get; set; } = null;
+        public long screenWidth { get; set; } = 0;// unix
+        public long screenHeight { get; set; } = 0;// unix
 
         public override bool Equals(object obj)
         {
@@ -1109,11 +1271,12 @@ namespace ComputerAnalytics
                     data.host = new Uri(data.fullUri).Host;
                     data.uA = request.context.Request.UserAgent;
                     data.queryString = data.fullUri.Contains("?") ? data.fullUri.Substring(data.fullUri.IndexOf("?")) : "";
-                    data.remote = request.context.Request.RemoteEndPoint.Address.ToString();
+                    data.remote = request.context.Request.Headers["X-Forwarded-For"] == null ? request.context.Request.RemoteEndPoint.Address.ToString() : request.context.Request.Headers["X-Forwarded-For"];
                     data.duration = data.sideClose - data.sideOpen;
                     if (data.duration < 0) throw new Exception("Some idiot made a manual request with negative duration.");
                     data.openTime = TimeConverter.UnixTimeStampToDateTime(data.sideOpen);
                     data.closeTime = TimeConverter.UnixTimeStampToDateTime(data.sideClose);
+                    if (data.closeTime > DateTime.Now) throw new Exception("Some idiot or browser thought it'd be funny to close the site in the future");
                     if (data.fullUri.Contains("script") || data.uA.Contains("script") || data.referrer.Contains("script"))
                     {
                         throw new Exception("Analytics contains 'script' which is forbidden for security resons");
@@ -1145,6 +1308,7 @@ namespace ComputerAnalytics
                     if (data.duration < 0) throw new Exception("Some idiot made a manual request with negative duration.");
                     data.openTime = TimeConverter.UnixTimeStampToDateTime(data.sideOpen);
                     data.closeTime = TimeConverter.UnixTimeStampToDateTime(data.sideClose);
+                    if (data.closeTime > DateTime.Now) throw new Exception("Some idiot or browser thought it'd be funny to close the site in the future");
                     data.queryString = data.fullUri.Contains("?") ? data.fullUri.Substring(data.fullUri.IndexOf("?")) : "";
                     break;
                 default:

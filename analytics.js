@@ -7,7 +7,9 @@ var analytic = {
     sideOpen: Math.floor(Date.now() / 1000),
     sideClose: 0,
     referrer: document.referrer,
-    token: token
+    token: token,
+    screenWidth: window.screen.width,
+    screenHeight: window.screen.height
 }
 
 

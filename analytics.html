@@ -2,38 +2,29 @@
 <html>
 <head>
     <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
-    <style>
-        body {
-            color: #EEEEEE;
-            background-color: #222222;
-            font-family: Open Sans;
-        }
-
-        a {
-            text-decoration: none;
-            color: #30A2EC;
-        }
-    </style>
+    <link href='/style.css' rel='stylesheet' type='text/css'>
 </head>
 <body>
     <div>
-        <import id="import">Import</import>
+        <div class="customButton" id="import">Import</div>
+        <h1>Date</h1>
         <div id="trafficDateContainer">
-
+            <div class="loading"></div>
         </div>
         <h1>Hosts</h1>
         <div id="hosts" style="display: flex; flex-wrap: wrap; width: 100%;">
-
+            <div class="loading"></div>
         </div>
         <h1>Referrers</h1>
         <div id="referrers" style="display: flex; flex-wrap: wrap; width: 100%;">
-
+            <div class="loading"></div>
         </div>
         <h1>Query Strings</h1>
         <div id="querystring" style="display: flex; flex-wrap: wrap; width: 100%;">
-
+            <div class="loading"></div>
         </div>
     </div>
+    <script src="/script.js"></script>
     <script>
         const trafficDateContainer = "trafficDateContainer"
         const imp = document.getElementById("import")
@@ -52,6 +43,7 @@
                     users.x.push(element.date)
                     users.y.push(element.totalUniqueIPs)
                 });
+                document.getElementById(trafficDateContainer).innerHTML = ""
                 Plotly.newPlot(trafficDateContainer, [clicks, users], layout)
                 document.getElementById(trafficDateContainer).on('plotly_click', function(data){
                     var pts = '';

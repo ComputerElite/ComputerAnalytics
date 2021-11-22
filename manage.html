@@ -2,37 +2,7 @@
 <html>
     <head>
         <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
-    <style>
-        body {
-            color: #EEEEEE;
-            background-color: #222222;
-            font-family: Open Sans;
-            width: 100%;
-        }
-
-        html {
-            width: 100%;
-        }
-
-        a {
-            text-decoration: none;
-            color: #30A2EC;
-        }
-
-        .customButton {
-            border: #111111 2px solid;
-            color: #EEEEEE;
-            background-color: #333333;
-            text-align: center;
-            padding: 5px;
-            width: fit-content;
-            height: fit-content;
-            cursor: pointer;
-            user-select: none;
-            transition: transform .1s;
-            margin: 10px;
-        }
-    </style>
+        <link href='/style.css' rel='stylesheet' type='text/css'>
     </head>
     <body>
         <div style="display: flex; justify-content: center; flex-direction: column; align-items: center;">
@@ -43,10 +13,19 @@
             <div onclick="Update()" class="customButton">Update server</div>
             <div style="width: 90%; background-color: #bbbbbb; height: 10px;"><div style="background-color: #42bbeb; height: 100%; width: 0%;" id="progress"></div></div>
             <div onclick="Export()" class="customButton">Export all data</div>
+            <div onclick="location.href = '/console'" class="customButton">View console</div>
+            <input placeholder="webhookUrl" type="password" id="webhook">
+            <div onclick="MasterWebhook()" class="customButton">Set master Discord webhook url</div>
+            <div onclick="Restart()" class="customButton">Restart server</div>
+            <div onclick="Shutdown()" class="customButton" style="background-color: #DA3633">Shutdown server</div>
             <table>
                 <tr>
-                    <td>Ram usage</td>
-                    <td id="ram"></td>
+                    <td class="left">Ram usage</td>
+                    <td id="ram" class="right"></td>
+                </tr>
+                <tr>
+                    <td class="left">Working directory</td>
+                    <td id="working" class="right"></td>
                 </tr>
             </table>
             <h4>Websites</h4>
@@ -54,6 +33,7 @@
 
             </div>
         </div>
+        <script src="/script.js"></script>
         <script>
             const websites = document.getElementById("websites")
             const progress = document.getElementById("progress")
@@ -102,10 +82,25 @@
                     })
                 })
             }
+            function Restart() {
+                POST("/restart", "")
+            }
+            function Shutdown() {
+                POST("/shutdown", "")
+            }
             function Renew(url) {
-                fetch("/renewtokens", {
+                POST("/renewtokens", url)
+            }
+            function MasterWebhook() {
+                POST("/masterwebhook", document.getElementById("webhook").value)
+            }
+            function Webhook(id, url) {
+                POST("/webhook?url=" + url, document.getElementById(id).value)
+            }
+            function POST(url, body) {
+                fetch(url, {
                     method: "POST",
-                    body: url
+                    body: body
                 }).then(res => {
                     res.text().then(t => {
                         alert(t)
@@ -132,32 +127,32 @@
             function IP() {
                 var url = document.getElementById("ip").value
                 if(url.endsWith("/")) url = url.substring(0, url.length - 1)
-                fetch("/publicaddress", {
-                    method: "POST",
-                    body: url
-                }).then(res => {
-                    res.text().then(t => {
-                        alert(t)
-                        location.reload()
-                    })
-                })
+                POST("/publicaddress", url)
             }
             fetch("/publicaddress").then(res => res.text().then(t => {
                 document.getElementById("ip").value = t
             }))
             fetch("/metrics").then(res => res.json().then(json => {
                 document.getElementById("ram").innerHTML = json.ramUsageString
+                document.getElementById("working").innerHTML = json.workingDirectory
+            }))
+            fetch("/masterwebhook").then(res => res.text().then(t => {
+                document.getElementById("webhook").value = t
             }))
             fetch("/websites").then(res => {
                 res.json().then(w => {
+                    var i = 0
                     w.forEach(e => {
                         websites.innerHTML +=  `<div style="display: flex; flex-direction: column; border: #EEEEEE 1px solid; width: 100%; padding: 15px;">
                                                 <a style="font-weight: bold;" href="${e.url}">${e.url}</a>
                                                 <div>public: ${e.publicToken}</div>
                                                 <div>private: ${e.privateToken}</div>
+                                                <input placeholder="webhookUrl" value="${e.discordWebhookUrl}" type="password" id="${i}">
+                                                <div onclick="Webhook('${i}', '${e.url}')" class="customButton">Set Discord webhook url</div>
                                                 <div class="customButton" onclick="Renew('${e.url}')">Renew tokens</div>
                                                 <div class="customButton" onclick="Delete('${e.url}')" style="background-color: #DA3633">Delete Website (not undoable)</div>
                                             </div>`
+                        i++
                     })
                 })
             })
