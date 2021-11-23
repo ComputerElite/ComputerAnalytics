@@ -16,6 +16,7 @@ using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -926,13 +927,12 @@ namespace ComputerAnalytics
 
         public List<AnalyticsEndpoint> GetAllEndpointsWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
         {
-            //Logger.Log("Crunching endpoints with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
-            //Stopwatch s = Stopwatch.StartNew();
+            PreCalculate(queryString);
             Dictionary<string, AnalyticsEndpoint> endpoints = new Dictionary<string, AnalyticsEndpoint>();
             foreach(string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
                 AnalyticsData data = AnalyticsData.Load(f);
-                if (IsNotValid(data, queryString)) continue;
+                if (IsNotValid(data)) continue;
                 if (!endpoints.ContainsKey(data.endpoint))
                 {
                     endpoints.Add(data.endpoint, new AnalyticsEndpoint());
@@ -958,19 +958,17 @@ namespace ComputerAnalytics
                 e.referrers = GetAllReferrersWithAssociatedData(e.data);
                 e.queryStrings = GetAllQueryStringsWithAssociatedData(e.data);
             }));
-            //Logger.Log("Crunching of endpoints with all data took " + s.ElapsedMilliseconds + " ms");
             return endpointsL;
         }
 
         public List<AnalyticsHost> GetAllHostsWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
         {
-            //Logger.Log("Crunching hosts with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
-            //Stopwatch s = Stopwatch.StartNew();
+            PreCalculate(queryString);
             Dictionary<string, AnalyticsHost> hosts = new Dictionary<string, AnalyticsHost>();
             foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
                 AnalyticsData data = AnalyticsData.Load(f);
-                if (IsNotValid(data, queryString)) continue;
+                if (IsNotValid(data)) continue;
                 if (!hosts.ContainsKey(data.host))
                 {
                     hosts.Add(data.host, new AnalyticsHost());
@@ -992,22 +990,20 @@ namespace ComputerAnalytics
             hostsL.ForEach(new Action<AnalyticsHost>(h => {
                 h.endpoints = GetAllEndpointsWithAssociatedData(h.data);
                 h.avgDuration = h.totalDuration / (double)h.totalClicks;
-                h.referrers = GetAllReferrersWithAssociatedData(h.data);
-                h.queryStrings = GetAllQueryStringsWithAssociatedData(h.data);
+                //h.referrers = GetAllReferrersWithAssociatedData(h.data);
+                //h.queryStrings = GetAllQueryStringsWithAssociatedData(h.data);
             }));
-            //Logger.Log("Crunching of hosts with all data took " + s.ElapsedMilliseconds + " ms");
             return hostsL;
         }
 
         public List<AnalyticsDate> GetAllEndpointsSortedByDateWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
         {
-            //Logger.Log("Crunching endpoints sorted by date with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
-            //Stopwatch s = Stopwatch.StartNew();
+            PreCalculate(queryString);
             Dictionary<string, AnalyticsDate> dates = new Dictionary<string, AnalyticsDate>();
             foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
                 AnalyticsData data = AnalyticsData.Load(f);
-                if (IsNotValid(data, queryString)) continue;
+                if (IsNotValid(data)) continue;
                 string date = data.openTime.ToString("dd.MM.yyyy");
                 if(!dates.ContainsKey(date))
                 {
@@ -1029,24 +1025,22 @@ namespace ComputerAnalytics
             dates = Sorter.Sort(dates);
             List<AnalyticsDate> datesL = dates.Values.ToList();
             datesL.ForEach(new Action<AnalyticsDate>(d => {
-                d.endpoints = GetAllEndpointsWithAssociatedData(d.data);
+                //d.endpoints = GetAllEndpointsWithAssociatedData(d.data);
                 d.avgDuration = d.totalDuration / (double)d.totalClicks;
-                d.referrers = GetAllReferrersWithAssociatedData(d.data);
-                d.queryStrings = GetAllQueryStringsWithAssociatedData(d.data);
+                //d.referrers = GetAllReferrersWithAssociatedData(d.data);
+                //d.queryStrings = GetAllQueryStringsWithAssociatedData(d.data);
             }));
-            //Logger.Log("Crunching of endpoints sorted by date with all data took " + s.ElapsedMilliseconds + " ms");
             return datesL;
         }
 
         public List<AnalyticsReferrer> GetAllReferrersWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
         {
-            //Logger.Log("Crunching referrers with all data for " + usedData.Count + " analytics just for the idiot wanting to view it");
-            //Stopwatch s = Stopwatch.StartNew();
+            PreCalculate(queryString);
             Dictionary<string, AnalyticsReferrer> referrers = new Dictionary<string, AnalyticsReferrer>();
             foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
                 AnalyticsData data = AnalyticsData.Load(f);
-                if (IsNotValid(data, queryString)) continue;
+                if (IsNotValid(data)) continue;
                 if (!referrers.ContainsKey(data.referrer))
                 {
                     referrers.Add(data.referrer, new AnalyticsReferrer(data.referrer));
@@ -1063,30 +1057,60 @@ namespace ComputerAnalytics
             }
             List<AnalyticsReferrer> referrersL = referrers.Values.ToList();
             referrersL.ForEach(new Action<AnalyticsReferrer>(e => e.avgDuration = e.totalDuration / (double)e.referred));
-            //Logger.Log("Crunching of referrers with all data took " + s.ElapsedMilliseconds + " ms");
             return referrersL;
         }
 
-        public bool IsNotValid(AnalyticsData d, NameValueCollection queryString)
+        public string host = null;
+        public string endpoint = null;
+        public string querystring = null;
+        public string referrer = null;
+        public string[] date = null;
+
+        public int days = 0;
+        public int hours = 0;
+        public int minutes = 0;
+        public int seconds = 0;
+
+        public DateTime now = DateTime.Now;
+
+        public void PreCalculate(NameValueCollection c)
         {
-            if (queryString == null) return false;
-            if (queryString.Get("host") != null && d.host != queryString.Get("host")) return true;
-            if (queryString.Get("endpoint") != null && d.endpoint != queryString.Get("endpoint")) return true;
-            if (queryString.Get("querystring") != null && d.queryString != queryString.Get("querystring")) return true;
-            if (queryString.Get("referrer") != null && d.referrer != queryString.Get("referrer")) return true;
-            if (queryString.Get("date") != null && !queryString.Get("date").Split(',').Contains(d.openTime.ToString("dd.MM.yyyy"))) return true;
+            if (c == null) c = new NameValueCollection();
+            host = c.Get("host");
+            endpoint = c.Get("endpoint");
+            querystring = c.Get("query");
+            referrer = c.Get("referrer");
+            date = c.Get("date") == null ? null : c.Get("date").Split(',');
+
+            days = c.Get("days") != null && Regex.IsMatch(c.Get("days"), "[0-9]") ? Convert.ToInt32(c.Get("days")) : 0;
+            hours = c.Get("hours") != null && Regex.IsMatch(c.Get("hours"), "[0-9]") ? Convert.ToInt32(c.Get("hours")) : 0;
+            minutes = c.Get("minutes") != null && Regex.IsMatch(c.Get("minutes"), "[0-9]") ? Convert.ToInt32(c.Get("minutes")) : 0;
+            seconds = c.Get("seconds") != null && Regex.IsMatch(c.Get("seconds"), "[0-9]") ? Convert.ToInt32(c.Get("seconds")) : 0;
+        }
+
+        public bool IsNotValid(AnalyticsData d)
+        {
+            //if (host != null && d.host != host) return true;
+            if (endpoint != null && d.endpoint != endpoint) return true;
+            if (querystring != null && d.queryString != querystring) return true;
+            if (referrer != null && d.referrer != referrer) return true;
+            if (date != null && !date.Contains(d.openTime.ToString("dd.MM.yyyy"))) return true;
+
+            if (days != 0 && (now - d.openTime).TotalDays > days) return true;
+            if (hours != 0 && (now - d.openTime).TotalHours > hours) return true;
+            if (minutes != 0 && (now - d.openTime).TotalMinutes > minutes) return true;
+            if (seconds != 0 && (now - d.openTime).TotalSeconds > seconds) return true;
             return false;
         }
 
         public List<AnalyticsQueryString> GetAllQueryStringsWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
         {
-            //Logger.Log("Crunching QueryStrings with all data for " + usedData.Count + " analytics just for a really idiotic idiot");
-            //Stopwatch s = Stopwatch.StartNew();
+            PreCalculate(queryString);
             Dictionary<string, AnalyticsQueryString> queryStrings = new Dictionary<string, AnalyticsQueryString>();
             foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
                 AnalyticsData data = AnalyticsData.Load(f);
-                if (IsNotValid(data, queryString)) continue;
+                if (IsNotValid(data)) continue;
                 if (!queryStrings.ContainsKey(data.queryString))
                 {
                     queryStrings.Add(data.queryString, new AnalyticsQueryString(data.queryString));
@@ -1108,7 +1132,6 @@ namespace ComputerAnalytics
                 q.avgDuration = q.totalDuration / (double)q.totalClicks;
                 q.referrers = GetAllReferrersWithAssociatedData(q.data);
             }));
-            //Logger.Log("Crunching of QueryStrings with all data took " + s.ElapsedMilliseconds + " ms");
             return queryStringsL;
         }
     }
@@ -1123,9 +1146,9 @@ namespace ComputerAnalytics
         public double avgDuration { get; set; } = 0.0;
         public long totalDuration { get; set; } = 0;
 
-        public List<AnalyticsQueryString> queryStrings { get; set; } = new List<AnalyticsQueryString>();
+        //public List<AnalyticsQueryString> queryStrings { get; set; } = new List<AnalyticsQueryString>();
         public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
-        public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
+        //public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
         public List<string> data = new List<string>();
         public List<string> ips = new List<string>();
     }
@@ -1158,9 +1181,9 @@ namespace ComputerAnalytics
         public double avgDuration { get; set; } = 0.0;
         public long totalDuration { get; set; } = 0;
 
-        public List<AnalyticsQueryString> queryStrings { get; set; }  = new List<AnalyticsQueryString>();
-        public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
-        public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
+        //public List<AnalyticsQueryString> queryStrings { get; set; }  = new List<AnalyticsQueryString>();
+        //public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
+        //public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
         public List<string> data = new List<string>();
         public List<string> ips = new List<string>();
     }
