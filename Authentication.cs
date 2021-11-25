@@ -34,7 +34,6 @@ namespace ComputerAnalytics
         public string privateToken { get; set; } = "";
         public string discordWebhookUrl { get; set; } = "";
         public int siteClicks { get;set; } = 0;
-        public int siteIps { get; set; } = 0;
         public DateTime lastWebhookUpdate { get; set; } = DateTime.Now;
         public int index = 0;
     }

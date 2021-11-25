@@ -70,7 +70,7 @@ namespace ComputerAnalytics
         /// <param name="analyticsViewingAuthorization">Function to check if client is authorized to view data. default: no check</param>
         /// <param name="analyticsSendingAuthorization">Function to check if client is authorized to send data. default: no check</param>
         /// <param name="allowedOrigins">Allowed origins which can send analytics data to this server. default: all</param>
-        public void AddToServer(HttpServer httpServer, List<string> serverUris = null, Func<ServerRequest, bool> analyticsViewingAuthorization = null, Func<ServerRequest, bool> analyticsSendingAuthorization = null, List<string> allowedOrigins = null)
+        public void AddToServer(HttpServer httpServer)
         {
             Logger.displayLogInConsole = true;
             collection.LoadAllDatabases();
@@ -86,9 +86,7 @@ namespace ComputerAnalytics
                     {
                         try
                         {
-                            double sleep = (waiting - (DateTime.Now - collection.config.lastWebhookUpdate)).TotalMinutes;
-                            collection.config.lastWebhookUpdate = DateTime.Now;
-                            collection.SaveConfig();
+                            double sleep = (waiting - (DateTime.UtcNow - collection.config.lastWebhookUpdate)).TotalMinutes;
                             Logger.Log("Warning Systems and Site metrics waiting " + sleep + " minutes until next execution");
                             Thread.Sleep(sleep <= 0 ? 0 : (int)Math.Round(sleep * 60 * 1000));
                         }
@@ -102,7 +100,7 @@ namespace ComputerAnalytics
                             {
                                 Logger.Log("Sending master webhook");
                                 DiscordWebhook webhook = new DiscordWebhook(collection.config.masterDiscordWebhookUrl);
-                                webhook.SendEmbed("ComputerAnalytics metrics report", "__**Those metrics are for the last " + (DateTime.Now - collection.config.lastWebhookUpdate).TotalHours + " hours**__\n\n**Analytics recieved:** `" + collection.config.recievedAnalytics + "`\n**Rejected Analytics:** `" + collection.config.rejectedAnalytics + "`\n**Current Ram usage:**`" + SizeConverter.ByteSizeToString(Process.GetCurrentProcess().WorkingSet64) + "`\n\n_Next update in approximately " + waiting.TotalHours + " hours_", "master " + DateTime.Now, "ComputerAnalytics", "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), 0x1CAD15);
+                                webhook.SendEmbed("ComputerAnalytics metrics report", "__**Those metrics are for the last " + (DateTime.UtcNow - collection.config.lastWebhookUpdate).TotalHours + " hours**__\n\n**Analytics recieved:** `" + collection.config.recievedAnalytics + "`\n**Rejected Analytics:** `" + collection.config.rejectedAnalytics + "`\n**Current Ram usage:**`" + SizeConverter.ByteSizeToString(Process.GetCurrentProcess().WorkingSet64) + "`\n\n_Next update in approximately " + waiting.TotalHours + " hours_", "master " + DateTime.UtcNow, "ComputerAnalytics", "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), 0x1CAD15);
                             }
                             catch (Exception ex)
                             {
@@ -120,15 +118,17 @@ namespace ComputerAnalytics
                                 {
                                     Logger.Log("Sending webhook for " + w.url);
                                     DiscordWebhook webhook = new DiscordWebhook(w.discordWebhookUrl);
-                                    webhook.SendEmbed("Site metrics report", "__**Those metrics are for the last " + (DateTime.Now - w.lastWebhookUpdate).TotalHours + " hours**__\n\n**Site clicks:** `" + w.siteClicks + "`\n_If you want more details check the analytics page_\n\n_Next update in approximately " + waiting.TotalHours + " hours_", w.url + " " + DateTime.Now, "ComputerAnalytics", "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), 0x1CAD15);
+                                    webhook.SendEmbed("Site metrics report", "__**Those metrics are for the last " + (DateTime.UtcNow - w.lastWebhookUpdate).TotalHours + " hours**__\n\n**Site clicks:** `" + w.siteClicks + "`\n_If you want more details check the analytics page_\n\n_Next update in approximately " + waiting.TotalHours + " hours_", w.url + " " + DateTime.UtcNow, "ComputerAnalytics", "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), 0x1CAD15);
                                 } catch (Exception ex)
                                 {
                                     Logger.Log("Exception while sending webhook" + ex.ToString(), LoggingType.Warning);
                                 }
-                                collection.config.Websites[i].lastWebhookUpdate = DateTime.Now;
+                                collection.config.Websites[i].lastWebhookUpdate = DateTime.UtcNow;
                             }
                             collection.config.Websites[i].siteClicks = 0;
                         }
+                        collection.config.lastWebhookUpdate = DateTime.UtcNow;
+                        collection.SaveConfig();
                         iteration = -1;
                     }
                     iteration++;
@@ -160,6 +160,9 @@ namespace ComputerAnalytics
                 } catch(Exception e)
                 {
                     collection.config.rejectedAnalytics++;
+                    collection.SaveConfig();
+                    DiscordWebhook webhook = new DiscordWebhook(collection.config.masterDiscordWebhookUrl);
+                    webhook.SendEmbed("ComputerAnalytics rejected analytic", "**Reason:** `" + e.Message + "`\n**UA:** `" + request.context.Request.UserAgent + "`" , "master " + DateTime.UtcNow, "ComputerAnalytics", "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), 0xDA3633);
                     Logger.Log("Error while recieving analytics json:\n" + e.ToString(), LoggingType.Warning);
                     request.SendString(new AnalyticsResponse("error", e.Message).ToString(), "application/json", 500, true, new Dictionary<string, string>() { { "Access-Control-Allow-Origin", origin }, { "Access-Control-Allow-Credentials", "true" } });
                     return true;
@@ -221,22 +224,34 @@ namespace ComputerAnalytics
                     Logger.Log("Error while crunching data:\n" + e.ToString(), LoggingType.Warning);
                     request.SendString("Error: " + e.Message, "text/plain", 500);
                 }
-                
                 return true;
             }));
-            server.AddRoute("GET", "/analytics/date", new Func<ServerRequest, bool>(request =>
+            server.AddRoute("GET", "/analytics/time", new Func<ServerRequest, bool>(request =>
             {
                 if (IsNotLoggedIn(request)) return true;
                 try
                 {
-                    request.SendString(JsonSerializer.Serialize(collection.GetAllEndpointsSortedByDateWithAssociatedData(request)), "application/json");
+                    request.SendString(JsonSerializer.Serialize(collection.GetAllEndpointsSortedByTimeWithAssociatedData(request)), "application/json");
                 }
                 catch (Exception e)
                 {
                     Logger.Log("Error while crunching data:\n" + e.ToString(), LoggingType.Warning);
                     request.SendString("Error: " + e.Message, "text/plain", 500);
                 }
-
+                return true;
+            }));
+            server.AddRoute("GET", "/analytics/screen", new Func<ServerRequest, bool>(request =>
+            {
+                if (IsNotLoggedIn(request)) return true;
+                try
+                {
+                    request.SendString(JsonSerializer.Serialize(collection.GetAllScreensWithAssociatedData(request)), "application/json");
+                }
+                catch (Exception e)
+                {
+                    Logger.Log("Error while crunching data:\n" + e.ToString(), LoggingType.Warning);
+                    request.SendString("Error: " + e.Message, "text/plain", 500);
+                }
                 return true;
             }));
             server.AddRoute("GET", "/analytics/referrers", new Func<ServerRequest, bool>(request =>
@@ -401,7 +416,7 @@ namespace ComputerAnalytics
                     request.Send403();
                     return true;
                 }
-                string filename = DateTime.Now.Ticks + ".zip";
+                string filename = DateTime.UtcNow.Ticks + ".zip";
                 Logger.Log("Exporting all data as zip. This may take a minute to do");
                 ZipFile.CreateFromDirectory(collection.analyticsDir, filename);
                 Logger.Log("Sending zip");
@@ -563,6 +578,11 @@ namespace ComputerAnalytics
                 request.Redirect("https://github.com/ComputerElite/ComputerAnalytics/wiki");
                 return true;
             }));
+            server.AddRoute("GET", "/analytics/docs", new Func<ServerRequest, bool>(request =>
+            {
+                request.SendString(ReadResource("api.txt"));
+                return true;
+            }));
         }
 
         public string GetToken(ServerRequest request)
@@ -712,6 +732,7 @@ namespace ComputerAnalytics
             if (i == -1) throw new Exception("Website not registered");
             config.Websites[i].siteClicks++;
             databases[i].AddAnalyticData(data);
+            SaveConfig();
             return;
         }
 
@@ -843,14 +864,24 @@ namespace ComputerAnalytics
             return databases[i].GetAllHostsWithAssociatedData(null, queryString);
         }
 
-        public List<AnalyticsDate> GetAllEndpointsSortedByDateWithAssociatedData(ServerRequest request)
+        public List<AnalyticsTime> GetAllEndpointsSortedByTimeWithAssociatedData(ServerRequest request)
         {
             string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
             NameValueCollection queryString = request.queryString;
             int i = GetDatabaseIndexWithPrivateToken(privateToken);
-            if (i == -1) return new List<AnalyticsDate>();
-            Logger.Log("Crunching Endpoints Sorted by data of database for " + config.Websites[i].url + " just because of DN");
-            return databases[i].GetAllEndpointsSortedByDateWithAssociatedData(null, queryString);
+            if (i == -1) return new List<AnalyticsTime>();
+            Logger.Log("Crunching Endpoints Sorted by time of database for " + config.Websites[i].url + " just because of DN");
+            return databases[i].GetAllEndpointsSortedByTimeWithAssociatedData(null, queryString);
+        }
+
+        public List<AnalyticsScreen> GetAllScreensWithAssociatedData(ServerRequest request)
+        {
+            string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
+            NameValueCollection queryString = request.queryString;
+            int i = GetDatabaseIndexWithPrivateToken(privateToken);
+            if (i == -1) return new List<AnalyticsScreen>();
+            Logger.Log("Crunching screens of database for " + config.Websites[i].url + " just because of all those interesting sizes");
+            return databases[i].GetAllScreensWithAssociatedData(null, queryString);
         }
 
         public List<AnalyticsReferrer> GetAllReferrersWithAssociatedData(ServerRequest request)
@@ -900,7 +931,7 @@ namespace ComputerAnalytics
 
         public void DeleteOldAnalytics(TimeSpan maxTime)
         {
-            DateTime now = DateTime.Now;
+            DateTime now = DateTime.UtcNow;
             List<string> toDelete = new List<string>();
             foreach(string f in Directory.EnumerateFiles(analyticsDirectory))
             {
@@ -955,8 +986,8 @@ namespace ComputerAnalytics
             endpointsL.ForEach(new Action<AnalyticsEndpoint>(e =>
             {
                 e.avgDuration = e.totalDuration / (double)e.clicks;
-                e.referrers = GetAllReferrersWithAssociatedData(e.data);
-                e.queryStrings = GetAllQueryStringsWithAssociatedData(e.data);
+                e.referrers = GetAllReferrersWithAssociatedData(e.data, queryString);
+                e.queryStrings = GetAllQueryStringsWithAssociatedData(e.data, queryString);
             }));
             return endpointsL;
         }
@@ -988,7 +1019,7 @@ namespace ComputerAnalytics
             
             List<AnalyticsHost> hostsL = hosts.Values.ToList();
             hostsL.ForEach(new Action<AnalyticsHost>(h => {
-                h.endpoints = GetAllEndpointsWithAssociatedData(h.data);
+                h.endpoints = GetAllEndpointsWithAssociatedData(h.data, queryString);
                 h.avgDuration = h.totalDuration / (double)h.totalClicks;
                 //h.referrers = GetAllReferrersWithAssociatedData(h.data);
                 //h.queryStrings = GetAllQueryStringsWithAssociatedData(h.data);
@@ -996,41 +1027,86 @@ namespace ComputerAnalytics
             return hostsL;
         }
 
-        public List<AnalyticsDate> GetAllEndpointsSortedByDateWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
+        public string GetTimeString(AnalyticsData data)
+        {
+            if(timeunit == TimeUnit.date) return data.openTime.ToString("dd.MM.yyyy");
+            if (timeunit == TimeUnit.hour) return data.openTime.ToString("HH");
+            if (timeunit == TimeUnit.minute) return data.openTime.ToString("mm");
+            return "";
+        }
+
+        public List<AnalyticsTime> GetAllEndpointsSortedByTimeWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
         {
             PreCalculate(queryString);
-            Dictionary<string, AnalyticsDate> dates = new Dictionary<string, AnalyticsDate>();
+            Dictionary<string, AnalyticsTime> times = new Dictionary<string, AnalyticsTime>();
             foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
                 AnalyticsData data = AnalyticsData.Load(f);
                 if (IsNotValid(data)) continue;
-                string date = data.openTime.ToString("dd.MM.yyyy");
-                if(!dates.ContainsKey(date))
+                string date = GetTimeString(data);
+                if(!times.ContainsKey(date))
                 {
-                    dates.Add(date, new AnalyticsDate());
-                    dates[date].date = date;
-                    dates[date].unix = ((DateTimeOffset)new DateTime(data.openTime.Year, data.openTime.Month, data.openTime.Day)).ToUnixTimeSeconds();
+                    times.Add(date, new AnalyticsTime());
+                    times[date].time = date;
+                    times[date].unix = ((DateTimeOffset)data.openTime).ToUnixTimeSeconds();
                 }
-                dates[date].totalClicks++;
-                dates[date].data.Add(f);
-                dates[date].totalDuration += data.duration;
-                if (dates[date].maxDuration < data.duration) dates[date].maxDuration = data.duration;
-                if (dates[date].minDuration > data.duration) dates[date].minDuration = data.duration;
-                if (!dates[date].ips.Contains(data.remote))
+                times[date].totalClicks++;
+                times[date].data.Add(f);
+                times[date].totalDuration += data.duration;
+                if (times[date].maxDuration < data.duration) times[date].maxDuration = data.duration;
+                if (times[date].minDuration > data.duration) times[date].minDuration = data.duration;
+                if (!times[date].ips.Contains(data.remote))
                 {
-                    dates[date].totalUniqueIPs++;
-                    dates[date].ips.Add(data.remote);
+                    times[date].totalUniqueIPs++;
+                    times[date].ips.Add(data.remote);
                 }
             }
-            dates = Sorter.Sort(dates);
-            List<AnalyticsDate> datesL = dates.Values.ToList();
-            datesL.ForEach(new Action<AnalyticsDate>(d => {
+            times = Sorter.Sort(times);
+            List<AnalyticsTime> datesL = times.Values.ToList();
+            datesL.ForEach(new Action<AnalyticsTime>(d => {
                 //d.endpoints = GetAllEndpointsWithAssociatedData(d.data);
                 d.avgDuration = d.totalDuration / (double)d.totalClicks;
                 //d.referrers = GetAllReferrersWithAssociatedData(d.data);
                 //d.queryStrings = GetAllQueryStringsWithAssociatedData(d.data);
             }));
             return datesL;
+        }
+
+        public List<AnalyticsScreen> GetAllScreensWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
+        {
+            PreCalculate(queryString);
+            Dictionary<string, AnalyticsScreen> screens = new Dictionary<string, AnalyticsScreen>();
+            foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
+            {
+                AnalyticsData data = AnalyticsData.Load(f);
+                if (IsNotValid(data)) continue;
+                string screen = data.screenWidth + "," + data.screenHeight;
+                if (!screens.ContainsKey(screen))
+                {
+                    screens.Add(screen, new AnalyticsScreen());
+                    screens[screen].screenWidth = data.screenWidth;
+                    screens[screen].screenHeight = data.screenHeight;
+                }
+                screens[screen].clicks++;
+                screens[screen].data.Add(f);
+                screens[screen].totalDuration += data.duration;
+                if (screens[screen].maxDuration < data.duration) screens[screen].maxDuration = data.duration;
+                if (screens[screen].minDuration > data.duration) screens[screen].minDuration = data.duration;
+                if (!screens[screen].ips.Contains(data.remote))
+                {
+                    screens[screen].uniqueIPs++;
+                    screens[screen].ips.Add(data.remote);
+                }
+            }
+            screens = Sorter.Sort(screens);
+            List<AnalyticsScreen> screensL = screens.Values.ToList();
+            screensL.ForEach(new Action<AnalyticsScreen>(d => {
+                //d.endpoints = GetAllEndpointsWithAssociatedData(d.data);
+                d.avgDuration = d.totalDuration / (double)d.clicks;
+                //d.referrers = GetAllReferrersWithAssociatedData(d.data);
+                //d.queryStrings = GetAllQueryStringsWithAssociatedData(d.data);
+            }));
+            return screensL;
         }
 
         public List<AnalyticsReferrer> GetAllReferrersWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
@@ -1060,18 +1136,22 @@ namespace ComputerAnalytics
             return referrersL;
         }
 
+        // cache query string parameters for smol performance boost
         public string host = null;
         public string endpoint = null;
         public string querystring = null;
         public string referrer = null;
-        public string[] date = null;
+        public string screenwidth = null;
+        public string screenheight = null;
+        public TimeUnit timeunit = TimeUnit.date;
+        public string[] time = null;
 
         public int days = 0;
         public int hours = 0;
         public int minutes = 0;
         public int seconds = 0;
 
-        public DateTime now = DateTime.Now;
+        public DateTime now = DateTime.UtcNow;
 
         public void PreCalculate(NameValueCollection c)
         {
@@ -1080,12 +1160,16 @@ namespace ComputerAnalytics
             endpoint = c.Get("endpoint");
             querystring = c.Get("query");
             referrer = c.Get("referrer");
-            date = c.Get("date") == null ? null : c.Get("date").Split(',');
+            screenheight = c.Get("screenheight");
+            screenwidth = c.Get("screenwidth");
+            timeunit = (TimeUnit)Enum.Parse(typeof(TimeUnit), c.Get("timeunit") == null ? "date" : c.Get("timeunit").ToLower());
+            time = c.Get("time") == null ? null : c.Get("time").Split(',');
 
-            days = c.Get("days") != null && Regex.IsMatch(c.Get("days"), "[0-9]") ? Convert.ToInt32(c.Get("days")) : 0;
-            hours = c.Get("hours") != null && Regex.IsMatch(c.Get("hours"), "[0-9]") ? Convert.ToInt32(c.Get("hours")) : 0;
-            minutes = c.Get("minutes") != null && Regex.IsMatch(c.Get("minutes"), "[0-9]") ? Convert.ToInt32(c.Get("minutes")) : 0;
-            seconds = c.Get("seconds") != null && Regex.IsMatch(c.Get("seconds"), "[0-9]") ? Convert.ToInt32(c.Get("seconds")) : 0;
+            days = c.Get("days") != null && Regex.IsMatch(c.Get("days"), "[0-9]+") ? Convert.ToInt32(c.Get("days")) : 0;
+            hours = c.Get("hours") != null && Regex.IsMatch(c.Get("hours"), "[0-9]+") ? Convert.ToInt32(c.Get("hours")) : 0;
+            minutes = c.Get("minutes") != null && Regex.IsMatch(c.Get("minutes"), "[0-9]+") ? Convert.ToInt32(c.Get("minutes")) : 0;
+            seconds = c.Get("seconds") != null && Regex.IsMatch(c.Get("seconds"), "[0-9]+") ? Convert.ToInt32(c.Get("seconds")) : 0;
+            Logger.Log(days + " " + hours + " " + minutes + " " + seconds);
         }
 
         public bool IsNotValid(AnalyticsData d)
@@ -1094,12 +1178,15 @@ namespace ComputerAnalytics
             if (endpoint != null && d.endpoint != endpoint) return true;
             if (querystring != null && d.queryString != querystring) return true;
             if (referrer != null && d.referrer != referrer) return true;
-            if (date != null && !date.Contains(d.openTime.ToString("dd.MM.yyyy"))) return true;
+            if (screenwidth != null && d.screenWidth.ToString() != screenwidth) return true;
+            if (screenheight != null && d.screenHeight.ToString() != screenheight) return true;
+            if (time != null && !time.Contains(GetTimeString(d))) return true;
 
-            if (days != 0 && (now - d.openTime).TotalDays > days) return true;
-            if (hours != 0 && (now - d.openTime).TotalHours > hours) return true;
-            if (minutes != 0 && (now - d.openTime).TotalMinutes > minutes) return true;
-            if (seconds != 0 && (now - d.openTime).TotalSeconds > seconds) return true;
+            TimeSpan span = now - d.openTime;
+            if (days != 0 && span.TotalDays > days) return true;
+            if (hours != 0 && span.TotalHours > hours) return true;
+            if (minutes != 0 && span.TotalMinutes > minutes) return true;
+            if (seconds != 0 && span.TotalSeconds > seconds) return true;
             return false;
         }
 
@@ -1130,10 +1217,17 @@ namespace ComputerAnalytics
             queryStringsL.ForEach(new Action<AnalyticsQueryString>(q =>
             {
                 q.avgDuration = q.totalDuration / (double)q.totalClicks;
-                q.referrers = GetAllReferrersWithAssociatedData(q.data);
+                q.referrers = GetAllReferrersWithAssociatedData(q.data, queryString);
             }));
             return queryStringsL;
         }
+    }
+
+    public enum TimeUnit
+    {
+        date,
+        hour,
+        minute
     }
 
     public class AnalyticsHost
@@ -1170,12 +1264,30 @@ namespace ComputerAnalytics
         }
     }
 
-    public class AnalyticsDate
+    public class AnalyticsTime
     {
         public long totalClicks { get; set; } = 0;
         public long totalUniqueIPs { get; set; } = 0;
-        public string date { get; set; } = "";
+        public string time { get; set; } = "";
         public long unix { get; set; } = 0;
+        public long minDuration { get; set; } = long.MaxValue;
+        public long maxDuration { get; set; } = 0;
+        public double avgDuration { get; set; } = 0.0;
+        public long totalDuration { get; set; } = 0;
+
+        //public List<AnalyticsQueryString> queryStrings { get; set; }  = new List<AnalyticsQueryString>();
+        //public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
+        //public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
+        public List<string> data = new List<string>();
+        public List<string> ips = new List<string>();
+    }
+
+    public class AnalyticsScreen
+    {
+        public long clicks { get; set; } = 0;
+        public long uniqueIPs { get; set; } = 0;
+        public long screenWidth { get; set; } = 0;
+        public long screenHeight { get; set; } = 0;
         public long minDuration { get; set; } = long.MaxValue;
         public long maxDuration { get; set; } = 0;
         public double avgDuration { get; set; } = 0.0;
@@ -1288,7 +1400,7 @@ namespace ComputerAnalytics
         public static AnalyticsData Recieve(ServerRequest request)
         {
             AnalyticsData data = JsonSerializer.Deserialize<AnalyticsData>(request.bodyString);
-            data.fileName = DateTime.Now.Ticks + "_" + data.sideOpen + "_" + data.sideClose + ".json";
+            data.fileName = DateTime.UtcNow.Ticks + "_" + data.sideOpen + "_" + data.sideClose + ".json";
             switch(data.analyticsVersion)
             {
                 case "1.0":
@@ -1304,7 +1416,8 @@ namespace ComputerAnalytics
                     if (data.duration < 0) throw new Exception("Some idiot made a manual request with negative duration.");
                     data.openTime = TimeConverter.UnixTimeStampToDateTime(data.sideOpen);
                     data.closeTime = TimeConverter.UnixTimeStampToDateTime(data.sideClose);
-                    if (data.closeTime > DateTime.Now) throw new Exception("Some idiot or browser thought it'd be funny to close the site in the future");
+                    if (data.closeTime > DateTime.UtcNow + new TimeSpan(0, 0, 30)) throw new Exception("Some idiot or browser thought it'd be funny to close the site in the future");
+                    if (data.closeTime < DateTime.UtcNow - new TimeSpan(0, 1, 0)) throw new Exception("So either the internet really took 1 minute to deliver the request or you just fucked up and got the time wrong");
                     if (data.fullUri.Contains("script") || data.uA.Contains("script") || data.referrer.Contains("script"))
                     {
                         throw new Exception("Analytics contains 'script' which is forbidden for security resons");
@@ -1319,7 +1432,7 @@ namespace ComputerAnalytics
         public static AnalyticsData ImportAnalyticsEntry(AnalyticsData data)
         {
             //AnalyticsData data = JsonSerializer.Deserialize<AnalyticsData>(File.ReadAllText(file));
-            data.fileName = DateTime.Now.Ticks + "_" + data.sideOpen + "_" + data.sideClose + ".json";
+            data.fileName = DateTime.UtcNow.Ticks + "_" + data.sideOpen + "_" + data.sideClose + ".json";
             switch (data.analyticsVersion)
             {
                 case "1.0":
@@ -1336,7 +1449,7 @@ namespace ComputerAnalytics
                     if (data.duration < 0) throw new Exception("Some idiot made a manual request with negative duration.");
                     data.openTime = TimeConverter.UnixTimeStampToDateTime(data.sideOpen);
                     data.closeTime = TimeConverter.UnixTimeStampToDateTime(data.sideClose);
-                    if (data.closeTime > DateTime.Now) throw new Exception("Some idiot or browser thought it'd be funny to close the site in the future");
+                    if (data.closeTime > DateTime.UtcNow) throw new Exception("Some idiot or browser thought it'd be funny to close the site in the future");
                     data.queryString = data.fullUri.Contains("?") ? data.fullUri.Substring(data.fullUri.IndexOf("?")) : "";
                     break;
                 default:

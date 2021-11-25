@@ -1,0 +1,22 @@
+﻿Endpoints:
+    GET /analytics/time
+    GET /analytics/endpoints
+    GET /analytics/referrers
+    GET /analytics/querystring
+    GET /analytics/hosts
+
+Query Strings (for all endpoints; none required):
+    querysting: Filter for analytics with this querystring
+    host:       Filter for analytics on this host (deprecated)
+    endpoint:   Filter for analytics on this endpoint
+    time:       Filters for analytics with time (either 'dd.MM.yyyy', 'HH' or 'mm' based on timeunit)
+    timeunit:   Any of 'date', 'hour' and 'minute' (default: 'date')
+    referrer:   Filter for analytics from this referrer
+
+    (of the following the shortest time period will be used)
+    days:       Only use analytics from last x days
+    hours:      Only use analytics from last x hours
+    minutes:    Only use analytics from last x minutes
+    seconds:    Only use analytics from last x seconds
+
+You have to have the private token of your site as a cookie in your request

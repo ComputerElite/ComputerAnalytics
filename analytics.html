@@ -7,7 +7,18 @@
 <body>
     <div>
         <div class="customButton" id="import">Import</div>
-        <h1>Date</h1>
+        <h1>Filter by time (last)</h1>
+        <div><input type="number" id="days"> Days</div>
+        <div><input type="number" id="hours"> Hours</div>
+        <div><input type="number" id="minutes"> Minutes</div>
+        <div><input type="number" id="seconds"> Seconds</div>
+        <h1>
+            <select id="timeUnit">
+                <option value="date">Date</option>
+                <option value="hour">Hour</option>
+                <option value="minute">Minute</option>
+            </select>
+        </h1>
         <div id="trafficDateContainer">
             <div class="loading"></div>
         </div>
@@ -23,6 +34,10 @@
         <div id="querystring" style="display: flex; flex-wrap: wrap; width: 100%;">
             <div class="loading"></div>
         </div>
+        <h1>Screens</h1>
+        <div id="screens" style="display: flex; flex-wrap: wrap; width: 100%;">
+            <div class="loading"></div>
+        </div>
     </div>
     <script src="/script.js"></script>
     <script>
@@ -32,15 +47,48 @@
         const referrers = document.getElementById("referrers")
         const queryString = document.getElementById("querystring")
 
+        document.getElementById("days").value = param.get("days")
+        document.getElementById("hours").value = param.get("hours")
+        document.getElementById("minutes").value = param.get("minutes")
+        document.getElementById("seconds").value = param.get("seconds")
+        document.getElementById("timeUnit").value = param.has("timeunit") ? param.get("timeunit") : "date"
+        document.getElementById("days").onchange = (ev) => {
+            param.set("days", ev.target.value)
+            Reload()
+        }
+        document.getElementById("hours").onchange = (ev) => {
+            param.set("hours", ev.target.value)
+            Reload()
+        }
+        document.getElementById("minutes").onchange = (ev) => {
+            param.set("minutes", ev.target.value)
+            Reload()
+        }
+        document.getElementById("seconds").onchange = (ev) => {
+            param.set("seconds", ev.target.value)
+            Reload()
+        }
+        document.getElementById("timeUnit").onchange = (ev) => {
+            param.set("timeunit", ev.target.value)
+            Reload()
+        }
+
         // Display everything
         function Loaded() {
-            fetch("/analytics/date?" + param.toString()).then(res => res.json().then(json => {
+            const layout = {
+                font: {
+                    color: "#EEEEEE"
+                },
+                plot_bgcolor: "#222222",
+                paper_bgcolor: "#222222"
+            }
+            fetch("/analytics/time?" + param.toString()).then(res => res.json().then(json => {
                 var clicks = {x: [], y: [], fill: 'tozeroy', type: "scatter", line: {color: "#1a9c00", width: 3}, name: "clicks", marker: {size: 8}}
                 var users = {x: [], y: [], fill: 'tozeroy', type: "scatter", line: {color: "#00419c", width: 3}, name: "unique ips", marker: {size: 8}}
                 json.forEach(element => {
-                    clicks.x.push(element.date)
+                    clicks.x.push(element.time)
                     clicks.y.push(element.totalClicks)
-                    users.x.push(element.date)
+                    users.x.push(element.time)
                     users.y.push(element.totalUniqueIPs)
                 });
                 document.getElementById(trafficDateContainer).innerHTML = ""
@@ -50,7 +98,7 @@
                     for(var i=0; i < data.points.length; i++){
                         pts = data.points[i].x;
                     }
-                    SetDate(pts)
+                    SetTime(pts)
                 });
             }))
         }
@@ -67,8 +115,13 @@
             param.set("querystring", queryString)
             Reload()
         }
-        function SetDate(date) {
-            param.set("date", date)
+        function SetScreen(width, height) {
+            param.set("screenwidth", width)
+            param.set("screenheight", height)
+            Reload()
+        }
+        function SetTime(time) {
+            param.set("time", time)
             Reload()
         }
         function Reload() {
@@ -98,6 +151,21 @@
                                 </div>
                             </div>`
                 document.getElementById("hosts").innerHTML += host
+            });
+        }))
+        fetch("/analytics/screen?" + param.toString()).then(res => res.json().then(json => {
+            document.getElementById("screens").innerHTML = ""
+            var total = 0
+            json.forEach(e => {
+                total += e.clicks
+            })
+            json.forEach(e => {
+                document.getElementById("screens").innerHTML += `<div style="display: flex; flex-direction: column; border: #EEEEEE 1px solid; min-width: 24%; padding: 5px;" onclick="SetScreen('${e.screenWidth}', '${e.screenHeight}')">
+                                <div style="font-weight: bold;">${e.screenWidth} x ${e.screenHeight}</div>
+                                <div>${e.clicks} clicks (${Math.round(e.clicks / total * 10000) / 100} %)</div>
+                                <div>${e.uniqueIPs} unique IPs</div>
+                                <div>avg. ${ToElapsed(e.avgDuration)} min per visit</div>
+                            </div>`
             });
         }))
         fetch("/analytics/referrers?" + param.toString()).then(res => res.json().then(json => {
@@ -171,13 +239,6 @@
 
             input.click()
         }
-            const layout = {
-                font: {
-                    color: "#EEEEEE"
-                },
-                plot_bgcolor: "#222222",
-                paper_bgcolor: "#222222"
-            }
             
             function ToElapsed(input) {
                 var date = new Date(0);
