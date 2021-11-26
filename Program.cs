@@ -457,6 +457,8 @@ namespace ComputerAnalytics
                     return true;
                 }
                 FileManager.RecreateDirectoryIfExisting("updater");
+                DiscordWebhook webhook = new DiscordWebhook(collection.config.masterDiscordWebhookUrl);
+                webhook.SendEmbed("ComputerAnalytics Update Deployed", "**Changelog:** `" + (request.queryString.Get("changelog") == null ? "none" : request.queryString.Get("changelog")) + "`", "master " + DateTime.UtcNow, "ComputerAnalytics", "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), 0x42BBEB);
                 string zip = "updater" + Path.DirectorySeparatorChar + "update.zip";
                 File.WriteAllBytes(zip, request.bodyBytes);
                 foreach(string s in Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory))
@@ -915,7 +917,7 @@ namespace ComputerAnalytics
             if (!analyticsDir.EndsWith(Path.DirectorySeparatorChar)) analyticsDir += Path.DirectorySeparatorChar;
             bool log = Logger.displayLogInConsole;
             Logger.displayLogInConsole = true;
-            Logger.Log("Loading database in " + analyticsDir);
+            Logger.Log("Added database in " + analyticsDir);
             Stopwatch stopwatch = Stopwatch.StartNew();
             analyticsDirectory = analyticsDir;
             FileManager.CreateDirectoryIfNotExisting(analyticsDirectory);
@@ -1416,8 +1418,8 @@ namespace ComputerAnalytics
                     if (data.duration < 0) throw new Exception("Some idiot made a manual request with negative duration.");
                     data.openTime = TimeConverter.UnixTimeStampToDateTime(data.sideOpen);
                     data.closeTime = TimeConverter.UnixTimeStampToDateTime(data.sideClose);
-                    if (data.closeTime > DateTime.UtcNow + new TimeSpan(0, 0, 30)) throw new Exception("Some idiot or browser thought it'd be funny to close the site in the future");
-                    if (data.closeTime < DateTime.UtcNow - new TimeSpan(0, 1, 0)) throw new Exception("So either the internet really took 1 minute to deliver the request or you just fucked up and got the time wrong");
+                    if (data.closeTime > DateTime.UtcNow + new TimeSpan(0, 5, 0)) throw new Exception("Some idiot or browser thought it'd be funny to close the site in the future");
+                    if (data.closeTime < DateTime.UtcNow - new TimeSpan(0, 5, 0)) throw new Exception("So either the internet really took 5 minute to deliver the request or you just fucked up and got the time wrong");
                     if (data.fullUri.Contains("script") || data.uA.Contains("script") || data.referrer.Contains("script"))
                     {
                         throw new Exception("Analytics contains 'script' which is forbidden for security resons");

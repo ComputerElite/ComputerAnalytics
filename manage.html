@@ -49,6 +49,7 @@
                     var reader = new FileReader();
                     var fileName = this.files[0].name
                     reader.onloadend = function () {
+                        var changelog = prompt("Enter changelog (optional)")
                         var xhr = new XMLHttpRequest()
                         xhr.upload.addEventListener("progress", function(evt) {
                             if (evt.lengthComputable) {
@@ -62,7 +63,7 @@
 
                             }
                         }, false);
-                        xhr.open("POST", "/update")
+                        xhr.open("POST", "/update?changelog=" + changelog)
                         xhr.send(reader.result)
 
                     }
