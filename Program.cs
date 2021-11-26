@@ -94,19 +94,7 @@ namespace ComputerAnalytics
                         {
                             Logger.Log("Error while waiting: " + ex.ToString(), LoggingType.Warning);
                         }
-                        if (collection.config.masterDiscordWebhookUrl != "")
-                        {
-                            try
-                            {
-                                Logger.Log("Sending master webhook");
-                                DiscordWebhook webhook = new DiscordWebhook(collection.config.masterDiscordWebhookUrl);
-                                webhook.SendEmbed("ComputerAnalytics metrics report", "__**Those metrics are for the last " + (DateTime.UtcNow - collection.config.lastWebhookUpdate).TotalHours + " hours**__\n\n**Analytics recieved:** `" + collection.config.recievedAnalytics + "`\n**Rejected Analytics:** `" + collection.config.rejectedAnalytics + "`\n**Current Ram usage:**`" + SizeConverter.ByteSizeToString(Process.GetCurrentProcess().WorkingSet64) + "`\n\n_Next update in approximately " + waiting.TotalHours + " hours_", "master " + DateTime.UtcNow, "ComputerAnalytics", "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), 0x1CAD15);
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.Log("Exception while sending webhook" + ex.ToString(), LoggingType.Warning);
-                            }
-                        }
+                        SendMasterWebhookMessage("ComputerAnalytics metrics report", "__**Those metrics are for the last " + (DateTime.UtcNow - collection.config.lastWebhookUpdate).TotalHours + " hours**__\n\n**Analytics recieved:** `" + collection.config.recievedAnalytics + "`\n**Rejected Analytics:** `" + collection.config.rejectedAnalytics + "`\n**Current Ram usage:**`" + SizeConverter.ByteSizeToString(Process.GetCurrentProcess().WorkingSet64) + "`\n\n_Next update in approximately " + waiting.TotalHours + " hours_", 0x1CAD15);
                         collection.config.recievedAnalytics = 0;
                         collection.config.rejectedAnalytics = 0;
                         for (int i = 0; i < collection.config.Websites.Count; i++)
@@ -161,8 +149,7 @@ namespace ComputerAnalytics
                 {
                     collection.config.rejectedAnalytics++;
                     collection.SaveConfig();
-                    DiscordWebhook webhook = new DiscordWebhook(collection.config.masterDiscordWebhookUrl);
-                    webhook.SendEmbed("ComputerAnalytics rejected analytic", "**Reason:** `" + e.Message + "`\n**UA:** `" + request.context.Request.UserAgent + "`" , "master " + DateTime.UtcNow, "ComputerAnalytics", "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), 0xDA3633);
+                    SendMasterWebhookMessage("ComputerAnalytics rejected analytic", "**Reason:** `" + e.Message + "`\n**UA:** `" + request.context.Request.UserAgent + "`", 0xDA3633);
                     Logger.Log("Error while recieving analytics json:\n" + e.ToString(), LoggingType.Warning);
                     request.SendString(new AnalyticsResponse("error", e.Message).ToString(), "application/json", 500, true, new Dictionary<string, string>() { { "Access-Control-Allow-Origin", origin }, { "Access-Control-Allow-Credentials", "true" } });
                     return true;
@@ -457,8 +444,7 @@ namespace ComputerAnalytics
                     return true;
                 }
                 FileManager.RecreateDirectoryIfExisting("updater");
-                DiscordWebhook webhook = new DiscordWebhook(collection.config.masterDiscordWebhookUrl);
-                webhook.SendEmbed("ComputerAnalytics Update Deployed", "**Changelog:** `" + (request.queryString.Get("changelog") == null ? "none" : request.queryString.Get("changelog")) + "`", "master " + DateTime.UtcNow, "ComputerAnalytics", "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), 0x42BBEB);
+                SendMasterWebhookMessage("ComputerAnalytics Update Deployed", "**Changelog:** `" + (request.queryString.Get("changelog") == null ? "none" : request.queryString.Get("changelog")) + "`", 0x42BBEB);
                 string zip = "updater" + Path.DirectorySeparatorChar + "update.zip";
                 File.WriteAllBytes(zip, request.bodyBytes);
                 foreach(string s in Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory))
@@ -598,6 +584,20 @@ namespace ComputerAnalytics
             return token.Value;
         }
 
+        public void SendMasterWebhookMessage(string title, string description, int color)
+        {
+            if (collection.config.masterDiscordWebhookUrl == "") return;
+            try
+            {
+                Logger.Log("Sending master webhook");
+                DiscordWebhook webhook = new DiscordWebhook(collection.config.masterDiscordWebhookUrl);
+                webhook.SendEmbed(title, description, "master " + DateTime.UtcNow, "ComputerAnalytics", "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), "https://computerelite.github.io/assets/CE_512px.png", collection.GetPublicAddress(), color);
+            }
+            catch (Exception ex)
+            {
+                Logger.Log("Exception while sending webhook" + ex.ToString(), LoggingType.Warning);
+            }
+        }
         public bool IsNotLoggedIn(ServerRequest request)
         {
             if (!collection.DoesWebsiteWithPrivateTokenExist(GetToken(request)))
