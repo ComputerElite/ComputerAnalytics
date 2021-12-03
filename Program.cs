@@ -964,6 +964,7 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsEndpoint> endpoints = new Dictionary<string, AnalyticsEndpoint>();
             foreach(string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
+                if (DoesFilenameMatchRequirements(f)) continue;
                 AnalyticsData data = AnalyticsData.Load(f);
                 if (IsNotValid(data)) continue;
                 if (!endpoints.ContainsKey(data.endpoint))
@@ -1000,6 +1001,7 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsHost> hosts = new Dictionary<string, AnalyticsHost>();
             foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
+                if (DoesFilenameMatchRequirements(f)) continue;
                 AnalyticsData data = AnalyticsData.Load(f);
                 if (IsNotValid(data)) continue;
                 if (!hosts.ContainsKey(data.host))
@@ -1043,6 +1045,7 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsTime> times = new Dictionary<string, AnalyticsTime>();
             foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
+                if (DoesFilenameMatchRequirements(f)) continue;
                 AnalyticsData data = AnalyticsData.Load(f);
                 if (IsNotValid(data)) continue;
                 string date = GetTimeString(data);
@@ -1080,6 +1083,7 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsScreen> screens = new Dictionary<string, AnalyticsScreen>();
             foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
+                if (DoesFilenameMatchRequirements(f)) continue;
                 AnalyticsData data = AnalyticsData.Load(f);
                 if (IsNotValid(data)) continue;
                 string screen = data.screenWidth + "," + data.screenHeight;
@@ -1117,6 +1121,7 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsReferrer> referrers = new Dictionary<string, AnalyticsReferrer>();
             foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
+                if (DoesFilenameMatchRequirements(f)) continue;
                 AnalyticsData data = AnalyticsData.Load(f);
                 if (IsNotValid(data)) continue;
                 if (!referrers.ContainsKey(data.referrer))
@@ -1167,11 +1172,11 @@ namespace ComputerAnalytics
             timeunit = (TimeUnit)Enum.Parse(typeof(TimeUnit), c.Get("timeunit") == null ? "date" : c.Get("timeunit").ToLower());
             time = c.Get("time") == null ? null : c.Get("time").Split(',');
 
-            days = c.Get("days") != null && Regex.IsMatch(c.Get("days"), "[0-9]+") ? Convert.ToInt32(c.Get("days")) : 0;
+            days = c.Get("days") != null && Regex.IsMatch(c.Get("days"), "[0-9]+") ? Convert.ToInt32(c.Get("days")) : 7;
             hours = c.Get("hours") != null && Regex.IsMatch(c.Get("hours"), "[0-9]+") ? Convert.ToInt32(c.Get("hours")) : 0;
             minutes = c.Get("minutes") != null && Regex.IsMatch(c.Get("minutes"), "[0-9]+") ? Convert.ToInt32(c.Get("minutes")) : 0;
             seconds = c.Get("seconds") != null && Regex.IsMatch(c.Get("seconds"), "[0-9]+") ? Convert.ToInt32(c.Get("seconds")) : 0;
-            Logger.Log(days + " " + hours + " " + minutes + " " + seconds);
+            //Logger.Log(days + " " + hours + " " + minutes + " " + seconds);
         }
 
         public bool IsNotValid(AnalyticsData d)
@@ -1184,12 +1189,23 @@ namespace ComputerAnalytics
             if (screenheight != null && d.screenHeight.ToString() != screenheight) return true;
             if (time != null && !time.Contains(GetTimeString(d))) return true;
 
-            TimeSpan span = now - d.openTime;
+            return IsTimeSpanNotValid(now - d.openTime);
+        }
+
+        public bool IsTimeSpanNotValid(TimeSpan span)
+        {
             if (days != 0 && span.TotalDays > days) return true;
             if (hours != 0 && span.TotalHours > hours) return true;
             if (minutes != 0 && span.TotalMinutes > minutes) return true;
             if (seconds != 0 && span.TotalSeconds > seconds) return true;
             return false;
+
+        }
+
+        public bool DoesFilenameMatchRequirements(string filename)
+        {
+            filename = Path.GetFileName(filename);
+            return IsTimeSpanNotValid(now - TimeConverter.UnixTimeStampToDateTime(long.Parse(filename.Split(new char[] { '_', '.' })[2])));
         }
 
         public List<AnalyticsQueryString> GetAllQueryStringsWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
@@ -1198,6 +1214,7 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsQueryString> queryStrings = new Dictionary<string, AnalyticsQueryString>();
             foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
             {
+                if (DoesFilenameMatchRequirements(f)) continue;
                 AnalyticsData data = AnalyticsData.Load(f);
                 if (IsNotValid(data)) continue;
                 if (!queryStrings.ContainsKey(data.queryString))

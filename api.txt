@@ -14,7 +14,7 @@ Query Strings (for all endpoints; none required):
     referrer:   Filter for analytics from this referrer
 
     (of the following the shortest time period will be used)
-    days:       Only use analytics from last x days
+    days:       Only use analytics from last x days (default: 7)
     hours:      Only use analytics from last x hours
     minutes:    Only use analytics from last x minutes
     seconds:    Only use analytics from last x seconds
