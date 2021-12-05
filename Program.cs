@@ -989,8 +989,11 @@ namespace ComputerAnalytics
             endpointsL.ForEach(new Action<AnalyticsEndpoint>(e =>
             {
                 e.avgDuration = e.totalDuration / (double)e.clicks;
-                e.referrers = GetAllReferrersWithAssociatedData(e.data, queryString);
-                e.queryStrings = GetAllQueryStringsWithAssociatedData(e.data, queryString);
+                if(deep)
+                {
+                    e.referrers = GetAllReferrersWithAssociatedData(e.data, queryString);
+                    e.queryStrings = GetAllQueryStringsWithAssociatedData(e.data, queryString);
+                }
             }));
             return endpointsL;
         }
@@ -1106,12 +1109,18 @@ namespace ComputerAnalytics
             }
             screens = Sorter.Sort(screens);
             List<AnalyticsScreen> screensL = screens.Values.ToList();
-            screensL.ForEach(new Action<AnalyticsScreen>(d => {
-                //d.endpoints = GetAllEndpointsWithAssociatedData(d.data);
-                d.avgDuration = d.totalDuration / (double)d.clicks;
-                //d.referrers = GetAllReferrersWithAssociatedData(d.data);
-                //d.queryStrings = GetAllQueryStringsWithAssociatedData(d.data);
-            }));
+            // Remove screens with fewer than 2 users
+            for(int i = 0; i < screensL.Count; i++)
+            {
+                if(screensL[i].uniqueIPs <= 1)
+                {
+                    screensL.RemoveAt(i);
+                    i--;
+                }
+                screensL[i].avgDuration = screensL[i].totalDuration / (double)screensL[i].clicks;
+            }
+            screensL = screensL.OrderBy(s => s.clicks).ToList();
+            screensL.Reverse();
             return screensL;
         }
 
@@ -1152,6 +1161,7 @@ namespace ComputerAnalytics
         public string screenheight = null;
         public TimeUnit timeunit = TimeUnit.date;
         public string[] time = null;
+        public bool deep = false;
 
         public int days = 0;
         public int hours = 0;
@@ -1171,6 +1181,7 @@ namespace ComputerAnalytics
             screenwidth = c.Get("screenwidth");
             timeunit = (TimeUnit)Enum.Parse(typeof(TimeUnit), c.Get("timeunit") == null ? "date" : c.Get("timeunit").ToLower());
             time = c.Get("time") == null ? null : c.Get("time").Split(',');
+            deep = c.Get("deep") != null;
 
             days = c.Get("days") != null && Regex.IsMatch(c.Get("days"), "[0-9]+") ? Convert.ToInt32(c.Get("days")) : 7;
             hours = c.Get("hours") != null && Regex.IsMatch(c.Get("hours"), "[0-9]+") ? Convert.ToInt32(c.Get("hours")) : 0;
@@ -1236,7 +1247,7 @@ namespace ComputerAnalytics
             queryStringsL.ForEach(new Action<AnalyticsQueryString>(q =>
             {
                 q.avgDuration = q.totalDuration / (double)q.totalClicks;
-                q.referrers = GetAllReferrersWithAssociatedData(q.data, queryString);
+                if(deep) q.referrers = GetAllReferrersWithAssociatedData(q.data, queryString);
             }));
             return queryStringsL;
         }

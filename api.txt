@@ -5,6 +5,8 @@
     GET /analytics/querystring
     GET /analytics/hosts
 
+You may get a Gateway timeout (504) and high response times the first (few) times you look at analytics
+
 Query Strings (for all endpoints; none required):
     querysting: Filter for analytics with this querystring
     host:       Filter for analytics on this host (deprecated)
@@ -12,6 +14,7 @@ Query Strings (for all endpoints; none required):
     time:       Filters for analytics with time (either 'dd.MM.yyyy', 'HH' or 'mm' based on timeunit)
     timeunit:   Any of 'date', 'hour' and 'minute' (default: 'date')
     referrer:   Filter for analytics from this referrer
+    deep:       presence of this query string will give back more in depth data (this may result in a gateway timeout and even higher response times)
 
     (of the following the shortest time period will be used)
     days:       Only use analytics from last x days (default: 7)
