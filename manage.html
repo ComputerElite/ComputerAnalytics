@@ -15,6 +15,7 @@
             <div onclick="Export()" class="customButton">Export all data</div>
             <div onclick="location.href = '/console'" class="customButton">View console</div>
             <input placeholder="webhookUrl" type="password" id="webhook">
+            <div onclick="MasterToken()" class="customButton">Renew master token</div>
             <div onclick="MasterWebhook()" class="customButton">Set master Discord webhook url</div>
             <div onclick="Restart()" class="customButton">Restart server</div>
             <div onclick="Shutdown()" class="customButton" style="background-color: #DA3633">Shutdown server</div>
@@ -120,6 +121,9 @@
             }
             function Restart() {
                 POST("/restart", "")
+            }
+            function MasterToken() {
+                POST("/renewmastertoken", "")
             }
             function Shutdown() {
                 POST("/shutdown", "")

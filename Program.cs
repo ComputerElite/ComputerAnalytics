@@ -361,6 +361,16 @@ namespace ComputerAnalytics
                 request.SendString(collection.RenewTokens(request.bodyString), "application/json");
                 return true;
             }));
+            server.AddRoute("POST", "/renewmastertoken", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(collection.RenewMasterToken(), "application/json");
+                return true;
+            }));
             server.AddRoute("GET", "/manage", new Func<ServerRequest, bool>(request =>
             {
                 if (GetToken(request) != collection.config.masterToken)
@@ -826,9 +836,16 @@ namespace ComputerAnalytics
             return "Website not registered";
         }
 
+        public string RenewMasterToken()
+        {
+            config.masterToken = CreateRandomToken();
+            SaveConfig();
+            return "New Master Token is " + config.masterToken + ". Save it somewhere safe!";
+        }
+
         public void SaveConfig()
         {
-            if(config.masterToken == "") config.masterToken = CreateRandomToken();
+            if(config.masterToken == "") RenewMasterToken();
             File.WriteAllText(analyticsDir + "config.json", JsonSerializer.Serialize(config));
         }
 
