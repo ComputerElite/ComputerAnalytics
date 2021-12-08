@@ -30,7 +30,29 @@
             </table>
             <h4>Websites</h4>
             <div id="websites">
-
+                
+            </div>
+            <div style="display: flex; align-items: center; justify-content: center; background-color: #00000044; visibility: hidden; position: absolute; width: 100vw; height: 100vh;" id="confirm">
+                <div style="background-color: #000000EE; padding: 20px;">
+                    <table>
+                        <tr>
+                            <td class="left">Public token</td>
+                            <td><input placeholder="Public token" type="text" id="public" style="width: 700px;"></td>
+                        </tr>
+                        <tr>
+                            <td class="left">Private Token</td>
+                            <td><input placeholder="private token" type="text" id="private" style="width: 700px;"></td>
+                        </tr>
+                        <tr>
+                            <td class="left">Website URL</td>
+                            <td><input placeholder="website url" type="text" id="url" style="width: 700px;"></td>
+                        </tr>
+                        <tr>
+                            <td class="left"><div onclick="RealDelete()" class="customButton" style="background-color: #DA3633">Confirm Deletion</div></td>
+                            <td><div onclick="document.getElementById('confirm').style.visibility = 'hidden'" class="customButton">Abort</div></td>
+                        </tr>
+                    </table>
+                </div>
             </div>
         </div>
         <script src="/script.js"></script>
@@ -72,16 +94,29 @@
 
                 input.click()
             }
-            function Delete(url) {
-                fetch("/website", {
-                    method: "DELETE",
-                    body: url
-                }).then(res => {
-                    res.text().then(t => {
-                        alert(t)
-                        location.reload()
+            var spublic = ""
+            var sprivate = ""
+            var surl = ""
+            function Delete(url, private, public) {
+                sprivate = private
+                spublic = public
+                surl = url
+                document.getElementById('confirm').style.visibility = 'visible'
+            }
+            function RealDelete() {
+                if(document.getElementById("private").value == sprivate && document.getElementById("url").value == surl && document.getElementById("public").value == spublic) {
+                    fetch("/website", {
+                        method: "DELETE",
+                        body: surl
+                    }).then(res => {
+                        res.text().then(t => {
+                            alert(t)
+                            location.reload()
+                        })
                     })
-                })
+                } else {
+                    alert("Private token, public token and url must match the website you want to delete")
+                }
             }
             function Restart() {
                 POST("/restart", "")
@@ -151,7 +186,7 @@
                                                 <input placeholder="webhookUrl" value="${e.discordWebhookUrl}" type="password" id="${i}">
                                                 <div onclick="Webhook('${i}', '${e.url}')" class="customButton">Set Discord webhook url</div>
                                                 <div class="customButton" onclick="Renew('${e.url}')">Renew tokens</div>
-                                                <div class="customButton" onclick="Delete('${e.url}')" style="background-color: #DA3633">Delete Website (not undoable)</div>
+                                                <div class="customButton" onclick="Delete('${e.url}', '${e.privateToken}', '${e.publicToken}')" style="background-color: #DA3633">Delete Website (not undoable)</div>
                                             </div>`
                         i++
                     })

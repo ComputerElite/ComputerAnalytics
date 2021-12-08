@@ -162,6 +162,8 @@
                                 <div>avg. ${ToElapsed(e.avgDuration)} min per visit</div>
                             </div>`
             });
+        }).catch(e => {
+            alert("issue")
         }))
         fetch("/analytics/referrers?" + param.toString()).then(res => res.json().then(json => {
             referrers.innerHTML = ""

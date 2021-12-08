@@ -985,7 +985,7 @@ namespace ComputerAnalytics
                     endpoints[data.endpoint].ips.Add(data.remote);
                 }
             }
-            List<AnalyticsEndpoint> endpointsL = endpoints.Values.ToList();
+            List<AnalyticsEndpoint> endpointsL = endpoints.Values.OrderBy(x => x.clicks).ToList();
             endpointsL.ForEach(new Action<AnalyticsEndpoint>(e =>
             {
                 e.avgDuration = e.totalDuration / (double)e.clicks;
@@ -1024,7 +1024,7 @@ namespace ComputerAnalytics
                 }
             }
             
-            List<AnalyticsHost> hostsL = hosts.Values.ToList();
+            List<AnalyticsHost> hostsL = hosts.Values.OrderBy(x => x.totalClicks).ToList();
             hostsL.ForEach(new Action<AnalyticsHost>(h => {
                 h.endpoints = GetAllEndpointsWithAssociatedData(h.data, queryString);
                 h.avgDuration = h.totalDuration / (double)h.totalClicks;
@@ -1070,7 +1070,7 @@ namespace ComputerAnalytics
                 }
             }
             times = Sorter.Sort(times);
-            List<AnalyticsTime> datesL = times.Values.ToList();
+            List<AnalyticsTime> datesL = times.Values.OrderBy(x => x.unix).ToList();
             datesL.ForEach(new Action<AnalyticsTime>(d => {
                 //d.endpoints = GetAllEndpointsWithAssociatedData(d.data);
                 d.avgDuration = d.totalDuration / (double)d.totalClicks;
@@ -1147,7 +1147,7 @@ namespace ComputerAnalytics
                     referrers[data.referrer].ips.Add(data.remote);
                 }
             }
-            List<AnalyticsReferrer> referrersL = referrers.Values.ToList();
+            List<AnalyticsReferrer> referrersL = referrers.Values.OrderBy(x => x.referred).ToList();
             referrersL.ForEach(new Action<AnalyticsReferrer>(e => e.avgDuration = e.totalDuration / (double)e.referred));
             return referrersL;
         }
@@ -1243,7 +1243,7 @@ namespace ComputerAnalytics
                     queryStrings[data.queryString].ips.Add(data.remote);
                 }
             }
-            List<AnalyticsQueryString> queryStringsL = queryStrings.Values.ToList();
+            List<AnalyticsQueryString> queryStringsL = queryStrings.Values.OrderBy(x => x.totalClicks).ToList();
             queryStringsL.ForEach(new Action<AnalyticsQueryString>(q =>
             {
                 q.avgDuration = q.totalDuration / (double)q.totalClicks;
