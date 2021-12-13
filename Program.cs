@@ -256,21 +256,6 @@ namespace ComputerAnalytics
 
                 return true;
             }));
-            server.AddRoute("GET", "/analytics/querystrings", new Func<ServerRequest, bool>(request =>
-            {
-                if (IsNotLoggedIn(request)) return true;
-                try
-                {
-                    request.SendString(JsonSerializer.Serialize(collection.GetAllQueryStringsWithAssociatedData(request)), "application/json");
-                }
-                catch (Exception e)
-                {
-                    Logger.Log("Error while crunching data:\n" + e.ToString(), LoggingType.Warning);
-                    request.SendString("Error: " + e.Message, "text/plain", 500);
-                }
-
-                return true;
-            }));
             server.AddRoute("GET", "/analytics/hosts", new Func<ServerRequest, bool>(request =>
             {
                 if (IsNotLoggedIn(request)) return true;
@@ -912,16 +897,6 @@ namespace ComputerAnalytics
             Logger.Log("Crunching Referrers of database for " + config.Websites[i].url + " just because of IsPinkCute == true");
             return databases[i].GetAllReferrersWithAssociatedData(null, queryString);
         }
-
-        public List<AnalyticsQueryString> GetAllQueryStringsWithAssociatedData(ServerRequest request)
-        {
-            string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
-            NameValueCollection queryString = request.queryString;
-            int i = GetDatabaseIndexWithPrivateToken(privateToken);
-            if (i == -1) return new List<AnalyticsQueryString>();
-            Logger.Log("Crunching QueryStrings of database for " + config.Websites[i].url + " just because I can do it :sunglasses:");
-            return databases[i].GetAllQueryStringsWithAssociatedData(null, queryString);
-        }
     }
 
     class AnalyticsDatabase
@@ -1009,7 +984,6 @@ namespace ComputerAnalytics
                 if(deep)
                 {
                     e.referrers = GetAllReferrersWithAssociatedData(e.data, queryString);
-                    e.queryStrings = GetAllQueryStringsWithAssociatedData(e.data, queryString);
                 }
             }));
             return endpointsL;
@@ -1045,8 +1019,6 @@ namespace ComputerAnalytics
             hostsL.ForEach(new Action<AnalyticsHost>(h => {
                 h.endpoints = GetAllEndpointsWithAssociatedData(h.data, queryString);
                 h.avgDuration = h.totalDuration / (double)h.totalClicks;
-                //h.referrers = GetAllReferrersWithAssociatedData(h.data);
-                //h.queryStrings = GetAllQueryStringsWithAssociatedData(h.data);
             }));
             return hostsL;
         }
@@ -1089,10 +1061,7 @@ namespace ComputerAnalytics
             times = Sorter.Sort(times);
             List<AnalyticsTime> datesL = times.Values.OrderBy(x => x.unix).ToList();
             datesL.ForEach(new Action<AnalyticsTime>(d => {
-                //d.endpoints = GetAllEndpointsWithAssociatedData(d.data);
                 d.avgDuration = d.totalDuration / (double)d.totalClicks;
-                //d.referrers = GetAllReferrersWithAssociatedData(d.data);
-                //d.queryStrings = GetAllQueryStringsWithAssociatedData(d.data);
             }));
             return datesL;
         }
@@ -1172,7 +1141,6 @@ namespace ComputerAnalytics
         // cache query string parameters for smol performance boost
         public string host = null;
         public string endpoint = null;
-        public string querystring = null;
         public string referrer = null;
         public string screenwidth = null;
         public string screenheight = null;
@@ -1192,7 +1160,6 @@ namespace ComputerAnalytics
             if (c == null) c = new NameValueCollection();
             host = c.Get("host");
             endpoint = c.Get("endpoint");
-            querystring = c.Get("query");
             referrer = c.Get("referrer");
             screenheight = c.Get("screenheight");
             screenwidth = c.Get("screenwidth");
@@ -1211,7 +1178,6 @@ namespace ComputerAnalytics
         {
             //if (host != null && d.host != host) return true;
             if (endpoint != null && d.endpoint != endpoint) return true;
-            if (querystring != null && d.queryString != querystring) return true;
             if (referrer != null && d.referrer != referrer) return true;
             if (screenwidth != null && d.screenWidth.ToString() != screenwidth) return true;
             if (screenheight != null && d.screenHeight.ToString() != screenheight) return true;
@@ -1234,39 +1200,6 @@ namespace ComputerAnalytics
         {
             filename = Path.GetFileName(filename);
             return IsTimeSpanNotValid(now - TimeConverter.UnixTimeStampToDateTime(long.Parse(filename.Split(new char[] { '_', '.' })[2])));
-        }
-
-        public List<AnalyticsQueryString> GetAllQueryStringsWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
-        {
-            PreCalculate(queryString);
-            Dictionary<string, AnalyticsQueryString> queryStrings = new Dictionary<string, AnalyticsQueryString>();
-            foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
-            {
-                if (DoesFilenameMatchRequirements(f)) continue;
-                AnalyticsData data = AnalyticsData.Load(f);
-                if (IsNotValid(data)) continue;
-                if (!queryStrings.ContainsKey(data.queryString))
-                {
-                    queryStrings.Add(data.queryString, new AnalyticsQueryString(data.queryString));
-                }
-                queryStrings[data.queryString].totalClicks++;
-                if(!queryStrings[data.queryString].fullUris.Contains(data.fullUri)) queryStrings[data.queryString].fullUris.Add(data.fullUri);
-                queryStrings[data.queryString].totalDuration += data.duration;
-                if (queryStrings[data.queryString].maxDuration < data.duration) queryStrings[data.queryString].maxDuration = data.duration;
-                if (queryStrings[data.queryString].minDuration > data.duration) queryStrings[data.queryString].minDuration = data.duration;
-                if (!queryStrings[data.queryString].ips.Contains(data.remote))
-                {
-                    queryStrings[data.queryString].totalUniqueIPs++;
-                    queryStrings[data.queryString].ips.Add(data.remote);
-                }
-            }
-            List<AnalyticsQueryString> queryStringsL = queryStrings.Values.OrderBy(x => x.totalClicks).ToList();
-            queryStringsL.ForEach(new Action<AnalyticsQueryString>(q =>
-            {
-                q.avgDuration = q.totalDuration / (double)q.totalClicks;
-                if(deep) q.referrers = GetAllReferrersWithAssociatedData(q.data, queryString);
-            }));
-            return queryStringsL;
         }
     }
 
@@ -1322,7 +1255,6 @@ namespace ComputerAnalytics
         public double avgDuration { get; set; } = 0.0;
         public long totalDuration { get; set; } = 0;
 
-        //public List<AnalyticsQueryString> queryStrings { get; set; }  = new List<AnalyticsQueryString>();
         //public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
         //public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
         public List<string> data = new List<string>();
@@ -1340,31 +1272,10 @@ namespace ComputerAnalytics
         public double avgDuration { get; set; } = 0.0;
         public long totalDuration { get; set; } = 0;
 
-        //public List<AnalyticsQueryString> queryStrings { get; set; }  = new List<AnalyticsQueryString>();
         //public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
         //public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
         public List<string> data = new List<string>();
         public List<string> ips = new List<string>();
-    }
-
-    public class AnalyticsQueryString
-    {
-        public long totalClicks { get; set; } = 0;
-        public long totalUniqueIPs { get; set; } = 0;
-        public long minDuration { get; set; } = long.MaxValue;
-        public long maxDuration { get; set; } = 0;
-        public double avgDuration { get; set; } = 0.0;
-        public long totalDuration { get; set; } = 0;
-        public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<string> data = new List<string>();
-        public List<string> ips = new List<string>();
-        public string queryString { get; set; } = "";
-        public List<string> fullUris { get; set; } = new List<string>();
-
-        public AnalyticsQueryString(string queryString = "")
-        {
-            this.queryString = queryString;
-        }
     }
 
     public class AnalyticsEndpoint
@@ -1379,7 +1290,6 @@ namespace ComputerAnalytics
         public long totalDuration { get; set; } = 0;
         public long uniqueIPs { get; set; } = 0;
 
-        public List<AnalyticsQueryString> queryStrings { get; set; } = new List<AnalyticsQueryString>();
         public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
         public List<string> data = new List<string>();
         public List<string> ips = new List<string>();
@@ -1406,7 +1316,6 @@ namespace ComputerAnalytics
         public string analyticsVersion { get; set; } = null;
         public string fullUri { get; set; } = null;
         public string fullEndpoint { get; set; } = null;
-        public string queryString { get; set; } = null;
         public string host { get; set; } = null;
         public string endpoint { get; set; } = null;
         public string uA { get; set; } = null;
@@ -1431,12 +1340,6 @@ namespace ComputerAnalytics
         public static AnalyticsData Load(string f)
         {
             AnalyticsData d = JsonSerializer.Deserialize<AnalyticsData>(File.ReadAllText(f));
-            if (d.queryString == null)
-            {
-                d.queryString = d.fullUri.Contains("?") ? d.fullUri.Substring( d.fullUri.IndexOf("?")) : "";
-                File.WriteAllText(f, JsonSerializer.Serialize(d));
-                Logger.Log("Added query string to " + d.fileName);
-            }
             if (d.fullUri.Contains("script") || d.uA.Contains("script") || d.referrer.Contains("script"))
             {
                 throw new Exception("Analytics contains 'script' which is forbidden for security resons");
@@ -1452,19 +1355,19 @@ namespace ComputerAnalytics
             {
                 case "1.0":
                     // data.endpoint = request.path; idiot, this will return /analytics
+                    data.fullUri = data.fullUri.Split('?')[0];
                     data.fullEndpoint = new Uri(data.fullUri).AbsolutePath;
                     data.endpoint = data.fullEndpoint.Substring(0, data.fullEndpoint.LastIndexOf("?") == -1 ? data.fullEndpoint.Length : data.fullEndpoint.LastIndexOf("?"));
                     if (!data.endpoint.EndsWith("/")) data.endpoint += "/";
                     data.host = new Uri(data.fullUri).Host;
                     data.uA = request.context.Request.UserAgent;
-                    data.queryString = data.fullUri.Contains("?") ? data.fullUri.Substring(data.fullUri.IndexOf("?")) : "";
                     data.remote = request.context.Request.Headers["X-Forwarded-For"] == null ? request.context.Request.RemoteEndPoint.Address.ToString() : request.context.Request.Headers["X-Forwarded-For"];
                     data.duration = data.sideClose - data.sideOpen;
                     if (data.duration < 0) throw new Exception("Some idiot made a manual request with negative duration.");
                     data.openTime = TimeConverter.UnixTimeStampToDateTime(data.sideOpen);
                     data.closeTime = TimeConverter.UnixTimeStampToDateTime(data.sideClose);
-                    if (data.closeTime > DateTime.UtcNow + new TimeSpan(0, 5, 0)) throw new Exception("Some idiot or browser thought it'd be funny to close the site in the future");
-                    if (data.closeTime < DateTime.UtcNow - new TimeSpan(0, 5, 0)) throw new Exception("So either the internet really took 5 minute to deliver the request or you just fucked up and got the time wrong");
+                    if (data.closeTime > DateTime.UtcNow + new TimeSpan(0, 10, 0)) throw new Exception("Some idiot or browser thought it'd be funny to close the site 10 minutes in the future");
+                    if (data.closeTime < DateTime.UtcNow - new TimeSpan(0, 10, 0)) throw new Exception("So either the internet really took 5 minute to deliver the request or you just fucked up and got the time wrong");
                     if (data.fullUri.Contains("script") || data.uA.Contains("script") || data.referrer.Contains("script"))
                     {
                         throw new Exception("Analytics contains 'script' which is forbidden for security resons");
@@ -1488,6 +1391,7 @@ namespace ComputerAnalytics
                     {
                         throw new Exception("Analytics contains 'script' which is forbidden for security resons");
                     }
+                    data.fullUri = data.fullUri.Split('?')[0];
                     data.fullEndpoint = new Uri(data.fullUri).AbsolutePath;
                     data.endpoint = data.fullEndpoint.Substring(0, data.fullEndpoint.LastIndexOf("?") == -1 ? data.fullEndpoint.Length : data.fullEndpoint.LastIndexOf("?"));
                     if (!data.endpoint.EndsWith("/")) data.endpoint += "/";
@@ -1497,7 +1401,6 @@ namespace ComputerAnalytics
                     data.openTime = TimeConverter.UnixTimeStampToDateTime(data.sideOpen);
                     data.closeTime = TimeConverter.UnixTimeStampToDateTime(data.sideClose);
                     if (data.closeTime > DateTime.UtcNow) throw new Exception("Some idiot or browser thought it'd be funny to close the site in the future");
-                    data.queryString = data.fullUri.Contains("?") ? data.fullUri.Substring(data.fullUri.IndexOf("?")) : "";
                     break;
                 default:
                     throw new Exception("Please use a supported analyticsVersion. Current latest: 1.0");

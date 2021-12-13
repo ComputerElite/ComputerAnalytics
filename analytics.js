@@ -3,7 +3,7 @@ const analyticsHosts = [{0}]
 const token = "{1}"
 var analytic = {
     analyticsVersion: analyticsVersion,
-    fullUri: window.location.href,
+    fullUri: window.location.href.split('?')[0],
     sideOpen: Math.floor(Date.now() / 1000),
     sideClose: 0,
     referrer: document.referrer,
