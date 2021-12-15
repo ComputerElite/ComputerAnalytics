@@ -943,7 +943,7 @@ namespace ComputerAnalytics
             {
                 AnalyticsData data = AnalyticsData.Load(f);
                 FileManager.CreateDirectoryIfNotExisting(analyticsDirectory + data.closeTime.ToString("dd.MM.yyyy") + "\\");
-                File.Move(f, analyticsDirectory + data.closeTime.ToString("dd.MM.yyyy") + "\\" + data.fileName);
+                File.Move(f, analyticsDirectory + data.closeTime.ToString("dd.MM.yyyy") + "\\" + data.fileName, true);
                 reordered++;
             }
             Logger.Log("Reordered " + reordered + " Analytics into new folder sorted by date");
@@ -951,21 +951,22 @@ namespace ComputerAnalytics
 
         public void AddAnalyticData(AnalyticsData analyticsData)
         {
-            FileManager.CreateDirectoryIfNotExisting(analyticsDirectory + analyticsData.closeTime.ToString("dd.MM.yyyy") + "\\");
-            File.WriteAllText(analyticsDirectory + analyticsData.closeTime.ToString("dd.MM.yyyy") + "\\" + analyticsData.fileName, analyticsData.ToString());
+            string f = analyticsDirectory + analyticsData.closeTime.ToString("dd.MM.yyyy") + "\\";
+            FileManager.CreateDirectoryIfNotExisting(f);
+            File.WriteAllText(f + analyticsData.fileName, analyticsData.ToString());
         }
 
         public void DeleteOldAnalytics(TimeSpan maxTime)
         {
             DateTime now = DateTime.UtcNow;
             List<string> toDelete = new List<string>();
-            foreach(string f in Directory.EnumerateFiles(analyticsDirectory))
+            foreach(string f in Directory.EnumerateDirectories(analyticsDirectory))
             {
-                AnalyticsData data = AnalyticsData.Load(f);
-                if (now - data.closeTime > maxTime)
+                DateTime d = DateTime.ParseExact(Path.GetFileName(f), "dd.MM.yyyy", null);
+                if (now - d > maxTime)
                 {
                     
-                    toDelete.Add(analyticsDirectory + data.fileName + data.fileName);
+                    toDelete.Add(f);
                 }
                 
             }
@@ -973,11 +974,11 @@ namespace ComputerAnalytics
             {
                 try
                 {
-                    Logger.Log("Deleting" + toDelete[i]);
-                    File.Delete(toDelete[i]);
+                    Logger.Log("Deleting " + toDelete[i]);
+                    Directory.Delete(toDelete[i], true);
                 } catch (Exception e)
                 {
-                    Logger.Log("Analytics file failed to delete while cleanup:\n" + e.ToString(), LoggingType.Warning);
+                    Logger.Log("Analytics date folder failed to delete while cleanup:\n" + e.ToString(), LoggingType.Warning);
                 }
             }
         }
