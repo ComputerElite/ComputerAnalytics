@@ -913,14 +913,46 @@ namespace ComputerAnalytics
             Stopwatch stopwatch = Stopwatch.StartNew();
             analyticsDirectory = analyticsDir;
             FileManager.CreateDirectoryIfNotExisting(analyticsDirectory);
-            string[] files = Directory.GetFiles(analyticsDirectory);
+            ReOrderDataFromV1();
             stopwatch.Stop();
             Logger.displayLogInConsole = log;
         }
 
+        public IEnumerable<string> GetIterator(bool useQueryString = true)
+        {
+            DateTime lastTime = DateTime.Now - new TimeSpan(days, hours, minutes, seconds);
+            Logger.Log(lastTime.ToString());
+            for(DateTime time = lastTime; time.Date <= DateTime.Now.Date; time = time.AddDays(1))
+            {
+                string d = analyticsDirectory + time.ToString("dd.MM.yyyy") + "\\";
+                if (Directory.Exists(d))
+                {
+                    foreach (string f in Directory.EnumerateFiles(d))
+                    {
+                        yield return f;
+                    }
+                }
+            }
+        }
+
+        public void ReOrderDataFromV1()
+        {
+            int reordered = 0;
+            Logger.Log("Reordering Analytics in base folder");
+            foreach(string f in Directory.GetFiles(analyticsDirectory))
+            {
+                AnalyticsData data = AnalyticsData.Load(f);
+                FileManager.CreateDirectoryIfNotExisting(analyticsDirectory + data.closeTime.ToString("dd.MM.yyyy") + "\\");
+                File.Move(f, analyticsDirectory + data.closeTime.ToString("dd.MM.yyyy") + "\\" + data.fileName);
+                reordered++;
+            }
+            Logger.Log("Reordered " + reordered + " Analytics into new folder sorted by date");
+        }
+
         public void AddAnalyticData(AnalyticsData analyticsData)
         {
-            File.WriteAllText(analyticsDirectory + analyticsData.fileName, analyticsData.ToString());
+            FileManager.CreateDirectoryIfNotExisting(analyticsDirectory + analyticsData.closeTime.ToString("dd.MM.yyyy") + "\\");
+            File.WriteAllText(analyticsDirectory + analyticsData.closeTime.ToString("dd.MM.yyyy") + "\\" + analyticsData.fileName, analyticsData.ToString());
         }
 
         public void DeleteOldAnalytics(TimeSpan maxTime)
@@ -930,7 +962,7 @@ namespace ComputerAnalytics
             foreach(string f in Directory.EnumerateFiles(analyticsDirectory))
             {
                 AnalyticsData data = AnalyticsData.Load(f);
-                if (now - data.openTime > maxTime)
+                if (now - data.closeTime > maxTime)
                 {
                     
                     toDelete.Add(analyticsDirectory + data.fileName + data.fileName);
@@ -954,7 +986,7 @@ namespace ComputerAnalytics
         {
             PreCalculate(queryString);
             Dictionary<string, AnalyticsEndpoint> endpoints = new Dictionary<string, AnalyticsEndpoint>();
-            foreach(string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
+            foreach(string f in usedData == null ? GetIterator() : usedData)
             {
                 if (DoesFilenameMatchRequirements(f)) continue;
                 AnalyticsData data = AnalyticsData.Load(f);
@@ -993,7 +1025,7 @@ namespace ComputerAnalytics
         {
             PreCalculate(queryString);
             Dictionary<string, AnalyticsHost> hosts = new Dictionary<string, AnalyticsHost>();
-            foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
+            foreach (string f in usedData == null ? GetIterator() : usedData)
             {
                 if (DoesFilenameMatchRequirements(f)) continue;
                 AnalyticsData data = AnalyticsData.Load(f);
@@ -1035,7 +1067,7 @@ namespace ComputerAnalytics
         {
             PreCalculate(queryString);
             Dictionary<string, AnalyticsTime> times = new Dictionary<string, AnalyticsTime>();
-            foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
+            foreach (string f in usedData == null ? GetIterator() : usedData)
             {
                 if (DoesFilenameMatchRequirements(f)) continue;
                 AnalyticsData data = AnalyticsData.Load(f);
@@ -1070,7 +1102,7 @@ namespace ComputerAnalytics
         {
             PreCalculate(queryString);
             Dictionary<string, AnalyticsScreen> screens = new Dictionary<string, AnalyticsScreen>();
-            foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
+            foreach (string f in usedData == null ? GetIterator() : usedData)
             {
                 if (DoesFilenameMatchRequirements(f)) continue;
                 AnalyticsData data = AnalyticsData.Load(f);
@@ -1114,7 +1146,7 @@ namespace ComputerAnalytics
         {
             PreCalculate(queryString);
             Dictionary<string, AnalyticsReferrer> referrers = new Dictionary<string, AnalyticsReferrer>();
-            foreach (string f in usedData == null ? Directory.EnumerateFiles(analyticsDirectory) : usedData)
+            foreach (string f in usedData == null ? GetIterator() : usedData)
             {
                 if (DoesFilenameMatchRequirements(f)) continue;
                 AnalyticsData data = AnalyticsData.Load(f);
@@ -1167,7 +1199,7 @@ namespace ComputerAnalytics
             time = c.Get("time") == null ? null : c.Get("time").Split(',');
             deep = c.Get("deep") != null;
 
-            days = c.Get("days") != null && Regex.IsMatch(c.Get("days"), "[0-9]+") ? Convert.ToInt32(c.Get("days")) : 7;
+            days = c.Get("days") != null ? Regex.IsMatch(c.Get("days"), "[0-9]+") ? Convert.ToInt32(c.Get("days")) : 0 : 7;
             hours = c.Get("hours") != null && Regex.IsMatch(c.Get("hours"), "[0-9]+") ? Convert.ToInt32(c.Get("hours")) : 0;
             minutes = c.Get("minutes") != null && Regex.IsMatch(c.Get("minutes"), "[0-9]+") ? Convert.ToInt32(c.Get("minutes")) : 0;
             seconds = c.Get("seconds") != null && Regex.IsMatch(c.Get("seconds"), "[0-9]+") ? Convert.ToInt32(c.Get("seconds")) : 0;
