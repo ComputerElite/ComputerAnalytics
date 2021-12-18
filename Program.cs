@@ -76,6 +76,16 @@ namespace ComputerAnalytics
             collection.LoadAllDatabases();
             this.server = httpServer;
             server.StartServer(collection.config.port);
+            Logger.Log("Public address: " + collection.GetPublicAddress());
+            foreach (string s in Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory))
+            {
+                if (s.EndsWith(".zip"))
+                {
+                    Logger.Log("Deleting " + s);
+                    File.Delete(s);
+                }
+            }
+            SendMasterWebhookMessage("Server started", "The server has just started", 0x42BBEB);
             Thread warningSystemsAndSiteMetrics = new Thread(() =>
             {
                 int iteration = 0;
@@ -123,19 +133,6 @@ namespace ComputerAnalytics
                 }
             });
             warningSystemsAndSiteMetrics.Start();
-            /*
-            if (serverUris == null) serverUris = new List<string>();
-            foreach(string prefix in server.GetPrefixes())
-            {
-                if (!serverUris.Contains(prefix)) serverUris.Add(prefix);
-            }
-            serverUris.ForEach(x => {
-                if (!x.EndsWith("/")) x += "/";
-                if (!x.StartsWith("http://") && !x.StartsWith("https://")) x = "http://" + x;
-                Logger.Log("Analytics can be send to " + x);
-            });
-            string serverUrisString = "\"" + String.Join("\",\"", serverUris) + "\"";
-            */
             Logger.Log("Analytics will be send to " + collection.GetPublicAddress());
             server.AddRoute("POST", "/analytics", new Func<ServerRequest, bool>(request =>
             {
@@ -391,6 +388,30 @@ namespace ComputerAnalytics
                 request.SendString(collection.GetPublicAddress(), "application/json");
                 return true;
             }));
+            server.AddRoute("GET", "/requestexport", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                string filename = "export.zip";
+                request.SendString("the zip is being generated. Check /export to get the file once it's available");
+                //request.SendString("requested export. Please head to /export");
+                Logger.Log("Exporting all data as zip. This may take a minute to do");
+                try
+                {
+                    if (File.Exists(filename)) File.Delete(filename);
+                } catch
+                {
+                    Logger.Log("Could not delete old export.zip");
+                    return true;
+                }
+                
+                ZipFile.CreateFromDirectory(collection.analyticsDir, filename);
+                Logger.Log("zip created");
+                return true;
+            }));
             server.AddRoute("GET", "/export", new Func<ServerRequest, bool>(request =>
             {
                 if (GetToken(request) != collection.config.masterToken)
@@ -398,12 +419,18 @@ namespace ComputerAnalytics
                     request.Send403();
                     return true;
                 }
-                string filename = DateTime.UtcNow.Ticks + ".zip";
-                Logger.Log("Exporting all data as zip. This may take a minute to do");
-                ZipFile.CreateFromDirectory(collection.analyticsDir, filename);
+                if(!File.Exists("export.zip"))
+                {
+                    request.SendString("File does not exist yet. Please refresh this site in a bit or request a new export zip from /requestexport", "text/plain", 425);
+                    return true;
+                }
+                
                 Logger.Log("Sending zip");
-                request.SendFile(filename);
-                File.Delete(filename);
+                try
+                {
+                    request.SendFile("export.zip");
+                    File.Delete("export.zip");
+                } catch { request.SendString("File exists but isn't ready. Please refresh this site in a bit or request a new export zip from /requestexport", "text/plain", 425); }
                 return true;
             }));
             server.AddRoute("GET", "/metrics", new Func<ServerRequest, bool>(request =>
@@ -444,6 +471,8 @@ namespace ComputerAnalytics
                 File.WriteAllBytes(zip, request.bodyBytes);
                 foreach(string s in Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory))
                 {
+                    if (s.EndsWith("zip")) continue;
+                    Logger.Log("Copying " + s);
                     File.Copy(s, "updater" + Path.DirectorySeparatorChar + Path.GetFileName(s), true);
                 }
                 //Logger.Log("dotnet \"" + AppDomain.CurrentDomain.BaseDirectory + "updater" + Path.DirectorySeparatorChar + "ComputerAnalytics.dll\" update");
@@ -566,6 +595,8 @@ namespace ComputerAnalytics
                 request.SendString(ReadResource("api.txt"));
                 return true;
             }));
+            // Do all stuff after server setup
+            collection.ReorderDataOfAllDataSetsV1();
         }
 
         public string GetToken(ServerRequest request)
@@ -848,6 +879,14 @@ namespace ComputerAnalytics
             return false;
         }
 
+        public void ReorderDataOfAllDataSetsV1()
+        {
+            for(int i = 0; i < databases.Count; i++)
+            {
+                databases[i].ReOrderDataFromV1();
+            }
+        }
+
         public List<AnalyticsEndpoint> GetAllEndpointsWithAssociatedData(ServerRequest request)
         {
             string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
@@ -913,7 +952,6 @@ namespace ComputerAnalytics
             Stopwatch stopwatch = Stopwatch.StartNew();
             analyticsDirectory = analyticsDir;
             FileManager.CreateDirectoryIfNotExisting(analyticsDirectory);
-            ReOrderDataFromV1();
             stopwatch.Stop();
             Logger.displayLogInConsole = log;
         }
@@ -921,14 +959,15 @@ namespace ComputerAnalytics
         public IEnumerable<string> GetIterator(bool useQueryString = true)
         {
             DateTime lastTime = DateTime.Now - new TimeSpan(days, hours, minutes, seconds);
-            Logger.Log(lastTime.ToString());
+            Logger.Log("Gettings Enumerable for all files from " + lastTime.ToString() + " to " + DateTime.Now);
             for(DateTime time = lastTime; time.Date <= DateTime.Now.Date; time = time.AddDays(1))
             {
-                string d = analyticsDirectory + time.ToString("dd.MM.yyyy") + "\\";
+                string d = analyticsDirectory + time.ToString("dd.MM.yyyy") + Path.DirectorySeparatorChar;
                 if (Directory.Exists(d))
                 {
                     foreach (string f in Directory.EnumerateFiles(d))
                     {
+                        //Logger.Log(f);
                         yield return f;
                     }
                 }
@@ -942,8 +981,10 @@ namespace ComputerAnalytics
             foreach(string f in Directory.GetFiles(analyticsDirectory))
             {
                 AnalyticsData data = AnalyticsData.Load(f);
-                FileManager.CreateDirectoryIfNotExisting(analyticsDirectory + data.closeTime.ToString("dd.MM.yyyy") + "\\");
-                File.Move(f, analyticsDirectory + data.closeTime.ToString("dd.MM.yyyy") + "\\" + data.fileName, true);
+                string newDir = analyticsDirectory + data.closeTime.ToString("dd.MM.yyyy") + Path.DirectorySeparatorChar;
+                FileManager.CreateDirectoryIfNotExisting(newDir);
+                Logger.Log("moving " + f + " to " + newDir + data.fileName);
+                File.Move(f, newDir + data.fileName, true);
                 reordered++;
             }
             Logger.Log("Reordered " + reordered + " Analytics into new folder sorted by date");
@@ -951,7 +992,7 @@ namespace ComputerAnalytics
 
         public void AddAnalyticData(AnalyticsData analyticsData)
         {
-            string f = analyticsDirectory + analyticsData.closeTime.ToString("dd.MM.yyyy") + "\\";
+            string f = analyticsDirectory + analyticsData.closeTime.ToString("dd.MM.yyyy") + Path.DirectorySeparatorChar;
             FileManager.CreateDirectoryIfNotExisting(f);
             File.WriteAllText(f + analyticsData.fileName, analyticsData.ToString());
         }
@@ -1204,7 +1245,7 @@ namespace ComputerAnalytics
             hours = c.Get("hours") != null && Regex.IsMatch(c.Get("hours"), "[0-9]+") ? Convert.ToInt32(c.Get("hours")) : 0;
             minutes = c.Get("minutes") != null && Regex.IsMatch(c.Get("minutes"), "[0-9]+") ? Convert.ToInt32(c.Get("minutes")) : 0;
             seconds = c.Get("seconds") != null && Regex.IsMatch(c.Get("seconds"), "[0-9]+") ? Convert.ToInt32(c.Get("seconds")) : 0;
-            //Logger.Log(days + " " + hours + " " + minutes + " " + seconds);
+            Logger.Log(days + " " + hours + " " + minutes + " " + seconds);
         }
 
         public bool IsNotValid(AnalyticsData d)
