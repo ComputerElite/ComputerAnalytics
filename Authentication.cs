@@ -17,6 +17,10 @@ namespace ComputerAnalytics
         public int recievedAnalytics { get; set; } = 0;
         public int rejectedAnalytics { get; set; } = 0;
         public DateTime lastWebhookUpdate { get; set; } = DateTime.Now;
+        public string mongoDBUrl { get; set; } = "";
+        public bool useMongoDB { get; set; } = false;
+        public bool migrateOldDataToMongoDB { get; set; } = false;
+        public string mongoDBName { get; set; } = "ComputerAnalytics";
     }
 
     public class Metrics

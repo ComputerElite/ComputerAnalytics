@@ -16,6 +16,8 @@
             <div onclick="location.href = '/console'" class="customButton">View console</div>
             <input placeholder="webhookUrl" type="password" id="webhook">
             <div onclick="MasterWebhook()" class="customButton">Set master Discord webhook url (boy above)</div>
+            <a href="/config" download="ComputerAnalyticsConfig.json">Download config</a>
+            <div onclick="Config()" class="customButton">Upload config</div>
             <div onclick="MasterToken()" class="customButton">Renew master token</div>
             <div onclick="Restart()" class="customButton">Restart server</div>
             <div onclick="Shutdown()" class="customButton" style="background-color: #DA3633">Shutdown server</div>
@@ -89,6 +91,28 @@
                         xhr.open("POST", "/update?changelog=" + changelog)
                         xhr.send(reader.result)
 
+                    }
+                    reader.readAsArrayBuffer(this.files[0]);
+                }
+
+                input.click()
+            }
+            function Config() {
+                var input = document.createElement("input")
+                input.setAttribute("type", "file")
+
+                input.onchange = function (e) {
+                    if (!this.files[0]) {
+                        return;
+                    }
+
+                    var reader = new FileReader();
+                    var fileName = this.files[0].name
+                    reader.onloadend = function () {
+                        fetch("/config", {
+                            method: "POST",
+                            body: reader.result
+                        }).then(res => res.text().then(res => alert(res)))
                     }
                     reader.readAsArrayBuffer(this.files[0]);
                 }

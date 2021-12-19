@@ -5,6 +5,10 @@ using ComputerUtils.RandomExtensions;
 using ComputerUtils.StringFormatters;
 using ComputerUtils.VarUtils;
 using ComputerUtils.Webserver;
+using MongoDB.Bson;
+using MongoDB.Bson.IO;
+using MongoDB.Bson.Serialization;
+using MongoDB.Driver;
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
@@ -59,21 +63,16 @@ namespace ComputerAnalytics
     class AnalyticsServer
     {
         public HttpServer server = null;
-        public AnalyticsDatabaseCollection collection = new AnalyticsDatabaseCollection();
+        public AnalyticsDatabaseCollection collection = null;
 
         /// <summary>
-        /// Adds analytics functionality to a existing and RUNNING server
+        /// Adds analytics functionality to a existing server
         /// </summary>
-        /// <param name="ports">ports on which the analytics can be sent</param>
         /// <param name="httpServer">server to which you want to add analytics functionality</param>
-        /// <param name="serverUris">all uris to which the server is assigned to aditionally to the computers ip adresses. This decides where the client sends the data to. If they are on a different server in allowed domains, if it isn't null, the first one is being used. Protocol must match with protocolof origin or the request is gonna be blocked by CORS</param>
-        /// <param name="analyticsViewingAuthorization">Function to check if client is authorized to view data. default: no check</param>
-        /// <param name="analyticsSendingAuthorization">Function to check if client is authorized to send data. default: no check</param>
-        /// <param name="allowedOrigins">Allowed origins which can send analytics data to this server. default: all</param>
         public void AddToServer(HttpServer httpServer)
         {
             Logger.displayLogInConsole = true;
-            collection.LoadAllDatabases();
+            collection = new AnalyticsDatabaseCollection(this);
             this.server = httpServer;
             server.StartServer(collection.config.port);
             Logger.Log("Public address: " + collection.GetPublicAddress());
@@ -595,7 +594,30 @@ namespace ComputerAnalytics
                 request.SendString(ReadResource("api.txt"));
                 return true;
             }));
+            server.AddRoute("GET", "/config", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(JsonSerializer.Serialize(collection.config), "application/json");
+                return true;
+            }));
+            server.AddRoute("POST", "/config", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                collection.config = JsonSerializer.Deserialize<Config>(request.bodyString);
+                collection.SaveConfig();
+                request.SendString("Updated config. Please restart the server to apply the changes you did.");
+                return true;
+            }));
             // Do all stuff after server setup
+            collection.LoadAllDatabases();
             collection.ReorderDataOfAllDataSetsV1();
         }
 
@@ -639,7 +661,6 @@ namespace ComputerAnalytics
             // Determine path
             var assembly = Assembly.GetExecutingAssembly();
             string resourcePath = name;
-            // Format: "{Namespace}.{Folder}.{filename}.{Extension}"
             if (!name.StartsWith(Assembly.GetExecutingAssembly().GetName().Name.ToString()))
             {
                 resourcePath = assembly.GetManifestResourceNames()
@@ -659,6 +680,13 @@ namespace ComputerAnalytics
         public List<AnalyticsDatabase> databases { get; set; } = new List<AnalyticsDatabase>();
         public Config config = new Config();
         public string analyticsDir = "";
+        public AnalyticsServer parentServer = null;
+        public MongoClient mongoClient = null;
+
+        public AnalyticsDatabaseCollection(AnalyticsServer parent)
+        {
+            this.parentServer = parent;
+        }
 
         public void LoadAllDatabases(string analyticsDir = "analytics")
         {
@@ -669,11 +697,16 @@ namespace ComputerAnalytics
             if (!File.Exists(analyticsDir + "config.json")) SaveConfig();
             config = JsonSerializer.Deserialize<Config>(File.ReadAllText(analyticsDir + "config.json"));
             if (config.publicAddress == "") SetPublicAddress("http://localhost");
-            for(int i = 0; i < config.Websites.Count; i++)
+            if (config.useMongoDB)
             {
-                AnalyticsDatabase database = new AnalyticsDatabase(analyticsDir + config.Websites[i].folder);
+                mongoClient = new MongoClient(config.mongoDBUrl);
+            }
+            for (int i = 0; i < config.Websites.Count; i++)
+            {
+                AnalyticsDatabase database = new AnalyticsDatabase(config.Websites[i].url, this, analyticsDir + config.Websites[i].folder);
                 databases.Add(database);
             }
+            SaveConfig();
             Logger.Log("Loaded all databases");
         }
 
@@ -774,6 +807,9 @@ namespace ComputerAnalytics
 
         public bool Contains(AnalyticsData d)
         {
+            throw new Exception("This method is deprecated");
+            /*
+            return false;
             int i = GetDatabaseIndexWithPublicToken(d.token);
             if (i == -1) throw new Exception("Website not registered");
 
@@ -782,6 +818,7 @@ namespace ComputerAnalytics
                 if (d.Equals(AnalyticsData.Load(s))) return true;
             }
             return false;
+            */
         }
 
         public string GetAllowedOrigin(string origin)
@@ -814,8 +851,14 @@ namespace ComputerAnalytics
             website.publicToken = CreateRandomToken();
             website.privateToken = CreateRandomToken();
             website.folder = StringFormatter.FileNameSafe(host).Replace("https", "").Replace("http", "") + Path.DirectorySeparatorChar;
-            if (Directory.Exists(analyticsDir + website.folder)) return "Website already exists";
-            AnalyticsDatabase database = new AnalyticsDatabase(analyticsDir + website.folder);
+            if(config.useMongoDB)
+            {
+                if (mongoClient.ListDatabaseNames().ToList().FirstOrDefault(x => x == website.url) != null) return "Website already exists";
+            } else
+            {
+                if (Directory.Exists(analyticsDir + website.folder)) return "Website already exists";
+            }
+            AnalyticsDatabase database = new AnalyticsDatabase(website.url, this, analyticsDir + website.folder);
             databases.Add(database);
             config.Websites.Add(website);
             SaveConfig();
@@ -828,7 +871,13 @@ namespace ComputerAnalytics
             {
                 if(config.Websites[i].url == url)
                 {
-                    Directory.Delete(analyticsDir + config.Websites[i].folder, true);
+
+                    if(Directory.Exists(analyticsDir + config.Websites[i].folder)) Directory.Delete(analyticsDir + config.Websites[i].folder, true);
+                    if (config.useMongoDB)
+                    {
+                        Logger.Log("Dropping MongoDBCollection");
+                        mongoClient.GetDatabase(config.mongoDBName).DropCollection(config.Websites[i].url);
+                    }
                     config.Websites.RemoveAt(i);
                     SaveConfig();
                     return "Deleted " + url + " including all Analytics";
@@ -862,6 +911,7 @@ namespace ComputerAnalytics
         public void SaveConfig()
         {
             if(config.masterToken == "") RenewMasterToken();
+            Logger.Log("Saving config");
             File.WriteAllText(analyticsDir + "config.json", JsonSerializer.Serialize(config));
         }
 
@@ -883,7 +933,7 @@ namespace ComputerAnalytics
         {
             for(int i = 0; i < databases.Count; i++)
             {
-                databases[i].ReOrderDataFromV1();
+                //databases[i].ReOrderDataFromV1();
             }
         }
 
@@ -940,42 +990,102 @@ namespace ComputerAnalytics
 
     class AnalyticsDatabase
     {
-        public string analyticsDirectory { get; set; } = "analytics" + Path.DirectorySeparatorChar;
+        public IMongoCollection<BsonDocument> documents = null;
+        public AnalyticsDatabaseCollection parentCollection = null;
+        public MongoClient parentMongoClient = null;
+        public string analyticsDirectory = "";
         //public List<AnalyticsData> data { get; set; } = new List<AnalyticsData>();
 
-        public AnalyticsDatabase(string analyticsDir = "analytics")
+        public AnalyticsDatabase(string collectionName, AnalyticsDatabaseCollection parentCollection, string analyticsDir)
         {
-            if (!analyticsDir.EndsWith(Path.DirectorySeparatorChar)) analyticsDir += Path.DirectorySeparatorChar;
+            this.parentCollection = parentCollection;
+            this.parentMongoClient = parentCollection.mongoClient;
+            this.analyticsDirectory = analyticsDir;
             bool log = Logger.displayLogInConsole;
             Logger.displayLogInConsole = true;
-            Logger.Log("Added database in " + analyticsDir);
-            Stopwatch stopwatch = Stopwatch.StartNew();
-            analyticsDirectory = analyticsDir;
-            FileManager.CreateDirectoryIfNotExisting(analyticsDirectory);
-            stopwatch.Stop();
+
+            if(parentCollection.config.useMongoDB)
+            {
+                
+                Logger.Log("Loading MongoDB Collection");
+                IMongoDatabase database = parentCollection.mongoClient.GetDatabase(parentCollection.config.mongoDBName);
+                documents = database.GetCollection<BsonDocument>(collectionName);
+                if (parentCollection.config.migrateOldDataToMongoDB)
+                {
+                    Logger.Log("Migrating local database to MongoDB");
+                    UploadDatabaseToMongoDB();
+                }
+            } else
+            {
+                FileManager.CreateDirectoryIfNotExisting(analyticsDirectory);
+            }
+            
             Logger.displayLogInConsole = log;
         }
 
-        public IEnumerable<string> GetIterator(bool useQueryString = true)
+        public IEnumerable<AnalyticsData> GetIterator(bool useQueryString = true)
         {
             DateTime lastTime = DateTime.Now - new TimeSpan(days, hours, minutes, seconds);
             Logger.Log("Gettings Enumerable for all files from " + lastTime.ToString() + " to " + DateTime.Now);
-            for(DateTime time = lastTime; time.Date <= DateTime.Now.Date; time = time.AddDays(1))
+            long  lastTimeUnix = TimeConverter.DateTimeToUnixTimestamp(lastTime);
+            if(parentCollection.config.useMongoDB)
             {
-                string d = analyticsDirectory + time.ToString("dd.MM.yyyy") + Path.DirectorySeparatorChar;
-                if (Directory.Exists(d))
+                foreach (BsonDocument document in documents.Find(new BsonDocument("sideClose", new BsonDocument("$gte", lastTimeUnix))).ToEnumerable())
                 {
-                    foreach (string f in Directory.EnumerateFiles(d))
+                    yield return BsonSerializer.Deserialize<AnalyticsData>(document);
+                }
+            } else
+            {
+                for (DateTime time = lastTime; time.Date <= DateTime.Now.Date; time = time.AddDays(1))
+                {
+                    string d = analyticsDirectory + time.ToString("dd.MM.yyyy") + Path.DirectorySeparatorChar;
+                    if (Directory.Exists(d))
                     {
-                        //Logger.Log(f);
-                        yield return f;
+                        foreach (string f in Directory.EnumerateFiles(d))
+                        {
+                            if (DoesFilenameMatchRequirements(f)) continue;
+                            AnalyticsData data = AnalyticsData.Load(f);
+                            yield return data;
+                        }
                     }
                 }
             }
+            
+        }
+
+        public void UploadDatabaseToMongoDB()
+        {
+            if (File.Exists(analyticsDirectory + "migratedTo" + StringFormatter.FileNameSafe(parentCollection.config.mongoDBUrl))) return;
+            int done = 0;
+            foreach (string d in Directory.EnumerateDirectories(analyticsDirectory))
+            {
+                foreach (string f in Directory.EnumerateFiles(d))
+                {
+                    
+                    BsonDocument doc = BsonSerializer.Deserialize<BsonDocument>(File.ReadAllText(f));
+                    if (documents.Find<BsonDocument>(doc).CountDocuments() >= 1) continue;
+                    documents.InsertOne(doc);
+                    done++;
+                    if (done % 100 == 0) Logger.Log("Migrated " + done + " files");
+                }
+            }
+            Logger.Log("Finished. Migrated " + done + "files");
+            File.WriteAllText(analyticsDirectory + "migratedTo" + StringFormatter.FileNameSafe(parentCollection.config.mongoDBUrl), "");
         }
 
         public void ReOrderDataFromV1()
         {
+            throw new NotImplementedException();
+            /*
+            
+            foreach(string d in Directory.EnumerateDirectories(analyticsDirectory))
+            {
+                foreach(string f in Directory.EnumerateFiles(d))
+                {
+                    collection.InsertOne(BsonSerializer.Deserialize<BsonDocument>(File.ReadAllText(f)));
+                }
+            }
+            
             int reordered = 0;
             Logger.Log("Reordering Analytics in base folder");
             foreach(string f in Directory.GetFiles(analyticsDirectory))
@@ -988,17 +1098,18 @@ namespace ComputerAnalytics
                 reordered++;
             }
             Logger.Log("Reordered " + reordered + " Analytics into new folder sorted by date");
+            */
         }
 
         public void AddAnalyticData(AnalyticsData analyticsData)
         {
-            string f = analyticsDirectory + analyticsData.closeTime.ToString("dd.MM.yyyy") + Path.DirectorySeparatorChar;
-            FileManager.CreateDirectoryIfNotExisting(f);
-            File.WriteAllText(f + analyticsData.fileName, analyticsData.ToString());
+            documents.InsertOne(analyticsData.ToBsonDocument());
         }
 
         public void DeleteOldAnalytics(TimeSpan maxTime)
         {
+            throw new NotImplementedException();
+            /*
             DateTime now = DateTime.UtcNow;
             List<string> toDelete = new List<string>();
             foreach(string f in Directory.EnumerateDirectories(analyticsDirectory))
@@ -1022,16 +1133,15 @@ namespace ComputerAnalytics
                     Logger.Log("Analytics date folder failed to delete while cleanup:\n" + e.ToString(), LoggingType.Warning);
                 }
             }
+            */
         }
 
-        public List<AnalyticsEndpoint> GetAllEndpointsWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsEndpoint> GetAllEndpointsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             PreCalculate(queryString);
             Dictionary<string, AnalyticsEndpoint> endpoints = new Dictionary<string, AnalyticsEndpoint>();
-            foreach(string f in usedData == null ? GetIterator() : usedData)
+            foreach(AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
-                if (DoesFilenameMatchRequirements(f)) continue;
-                AnalyticsData data = AnalyticsData.Load(f);
                 if (IsNotValid(data)) continue;
                 if (!endpoints.ContainsKey(data.endpoint))
                 {
@@ -1044,7 +1154,7 @@ namespace ComputerAnalytics
                 endpoints[data.endpoint].totalDuration += data.duration;
                 if (endpoints[data.endpoint].maxDuration < data.duration) endpoints[data.endpoint].maxDuration = data.duration;
                 if (endpoints[data.endpoint].minDuration > data.duration) endpoints[data.endpoint].minDuration = data.duration;
-                endpoints[data.endpoint].data.Add(f);
+                endpoints[data.endpoint].data.Add(data);
                 if (!endpoints[data.endpoint].ips.Contains(data.remote))
                 {
                     endpoints[data.endpoint].uniqueIPs++;
@@ -1063,14 +1173,12 @@ namespace ComputerAnalytics
             return endpointsL;
         }
 
-        public List<AnalyticsHost> GetAllHostsWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsHost> GetAllHostsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             PreCalculate(queryString);
             Dictionary<string, AnalyticsHost> hosts = new Dictionary<string, AnalyticsHost>();
-            foreach (string f in usedData == null ? GetIterator() : usedData)
+            foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
-                if (DoesFilenameMatchRequirements(f)) continue;
-                AnalyticsData data = AnalyticsData.Load(f);
                 if (IsNotValid(data)) continue;
                 if (!hosts.ContainsKey(data.host))
                 {
@@ -1078,7 +1186,7 @@ namespace ComputerAnalytics
                     hosts[data.host].host = data.host;
                 }
                 hosts[data.host].totalClicks++;
-                hosts[data.host].data.Add(f);
+                hosts[data.host].data.Add(data);
                 hosts[data.host].totalDuration += data.duration;
                 if (hosts[data.host].maxDuration < data.duration) hosts[data.host].maxDuration = data.duration;
                 if (hosts[data.host].minDuration > data.duration) hosts[data.host].minDuration = data.duration;
@@ -1105,14 +1213,12 @@ namespace ComputerAnalytics
             return "";
         }
 
-        public List<AnalyticsTime> GetAllEndpointsSortedByTimeWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsTime> GetAllEndpointsSortedByTimeWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             PreCalculate(queryString);
             Dictionary<string, AnalyticsTime> times = new Dictionary<string, AnalyticsTime>();
-            foreach (string f in usedData == null ? GetIterator() : usedData)
+            foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
-                if (DoesFilenameMatchRequirements(f)) continue;
-                AnalyticsData data = AnalyticsData.Load(f);
                 if (IsNotValid(data)) continue;
                 string date = GetTimeString(data);
                 if(!times.ContainsKey(date))
@@ -1122,7 +1228,7 @@ namespace ComputerAnalytics
                     times[date].unix = ((DateTimeOffset)data.openTime).ToUnixTimeSeconds();
                 }
                 times[date].totalClicks++;
-                times[date].data.Add(f);
+                times[date].data.Add(data);
                 times[date].totalDuration += data.duration;
                 if (times[date].maxDuration < data.duration) times[date].maxDuration = data.duration;
                 if (times[date].minDuration > data.duration) times[date].minDuration = data.duration;
@@ -1140,14 +1246,12 @@ namespace ComputerAnalytics
             return datesL;
         }
 
-        public List<AnalyticsScreen> GetAllScreensWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsScreen> GetAllScreensWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             PreCalculate(queryString);
             Dictionary<string, AnalyticsScreen> screens = new Dictionary<string, AnalyticsScreen>();
-            foreach (string f in usedData == null ? GetIterator() : usedData)
+            foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
-                if (DoesFilenameMatchRequirements(f)) continue;
-                AnalyticsData data = AnalyticsData.Load(f);
                 if (IsNotValid(data)) continue;
                 string screen = data.screenWidth + "," + data.screenHeight;
                 if (!screens.ContainsKey(screen))
@@ -1157,7 +1261,7 @@ namespace ComputerAnalytics
                     screens[screen].screenHeight = data.screenHeight;
                 }
                 screens[screen].clicks++;
-                screens[screen].data.Add(f);
+                screens[screen].data.Add(data);
                 screens[screen].totalDuration += data.duration;
                 if (screens[screen].maxDuration < data.duration) screens[screen].maxDuration = data.duration;
                 if (screens[screen].minDuration > data.duration) screens[screen].minDuration = data.duration;
@@ -1184,14 +1288,12 @@ namespace ComputerAnalytics
             return screensL;
         }
 
-        public List<AnalyticsReferrer> GetAllReferrersWithAssociatedData(List<string> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsReferrer> GetAllReferrersWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             PreCalculate(queryString);
             Dictionary<string, AnalyticsReferrer> referrers = new Dictionary<string, AnalyticsReferrer>();
-            foreach (string f in usedData == null ? GetIterator() : usedData)
+            foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
-                if (DoesFilenameMatchRequirements(f)) continue;
-                AnalyticsData data = AnalyticsData.Load(f);
                 if (IsNotValid(data)) continue;
                 if (!referrers.ContainsKey(data.referrer))
                 {
@@ -1241,10 +1343,13 @@ namespace ComputerAnalytics
             time = c.Get("time") == null ? null : c.Get("time").Split(',');
             deep = c.Get("deep") != null;
 
-            days = c.Get("days") != null ? Regex.IsMatch(c.Get("days"), "[0-9]+") ? Convert.ToInt32(c.Get("days")) : 0 : 7;
             hours = c.Get("hours") != null && Regex.IsMatch(c.Get("hours"), "[0-9]+") ? Convert.ToInt32(c.Get("hours")) : 0;
             minutes = c.Get("minutes") != null && Regex.IsMatch(c.Get("minutes"), "[0-9]+") ? Convert.ToInt32(c.Get("minutes")) : 0;
             seconds = c.Get("seconds") != null && Regex.IsMatch(c.Get("seconds"), "[0-9]+") ? Convert.ToInt32(c.Get("seconds")) : 0;
+            days = c.Get("days") != null && Regex.IsMatch(c.Get("days"), "[0-9]+") ? Convert.ToInt32(c.Get("days")) : 0;
+
+            if (days == 0 && hours == 0 && minutes == 0 && seconds == 0) days = 7;
+            
             Logger.Log(days + " " + hours + " " + minutes + " " + seconds);
         }
 
@@ -1257,7 +1362,7 @@ namespace ComputerAnalytics
             if (screenheight != null && d.screenHeight.ToString() != screenheight) return true;
             if (time != null && !time.Contains(GetTimeString(d))) return true;
 
-            return IsTimeSpanNotValid(now - d.openTime);
+            return false;
         }
 
         public bool IsTimeSpanNotValid(TimeSpan span)
@@ -1297,7 +1402,7 @@ namespace ComputerAnalytics
         //public List<AnalyticsQueryString> queryStrings { get; set; } = new List<AnalyticsQueryString>();
         public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
         //public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<string> data = new List<string>();
+        public List<AnalyticsData> data = new List<AnalyticsData>();
         public List<string> ips = new List<string>();
     }
 
@@ -1331,7 +1436,7 @@ namespace ComputerAnalytics
 
         //public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
         //public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<string> data = new List<string>();
+        public List<AnalyticsData> data = new List<AnalyticsData>();
         public List<string> ips = new List<string>();
     }
 
@@ -1348,7 +1453,7 @@ namespace ComputerAnalytics
 
         //public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
         //public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<string> data = new List<string>();
+        public List<AnalyticsData> data = new List<AnalyticsData>();
         public List<string> ips = new List<string>();
     }
 
@@ -1365,7 +1470,7 @@ namespace ComputerAnalytics
         public long uniqueIPs { get; set; } = 0;
 
         public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<string> data = new List<string>();
+        public List<AnalyticsData> data = new List<AnalyticsData>();
         public List<string> ips = new List<string>();
     }
 
