@@ -64,6 +64,7 @@ namespace ComputerAnalytics
     {
         public HttpServer server = null;
         public AnalyticsDatabaseCollection collection = null;
+        public Dictionary<string, string> replace = new Dictionary<string,string> { { "<", ""}, { ">", ""}, { "\\u003C", "" }, { "\\u003E", "" } };
 
         /// <summary>
         /// Adds analytics functionality to a existing server
@@ -72,6 +73,7 @@ namespace ComputerAnalytics
         public void AddToServer(HttpServer httpServer)
         {
             Logger.displayLogInConsole = true;
+            
             collection = new AnalyticsDatabaseCollection(this);
             this.server = httpServer;
             server.StartServer(collection.config.port);
@@ -160,7 +162,6 @@ namespace ComputerAnalytics
                     request.SendString(new AnalyticsResponse("error", "Error accepting json: " + e.Message).ToString(), "application/json", 500, true, new Dictionary<string, string>() { { "Access-Control-Allow-Origin", origin }, { "Access-Control-Allow-Credentials", "true" } });
                     return true;
                 }
-                Logger.Log("Added new analytics data: " + data.fileName);
                 request.SendString(new AnalyticsResponse("success", "Analytic recieved").ToString(), "application/json", 200, true, new Dictionary<string, string>() { { "Access-Control-Allow-Origin", origin }, { "Access-Control-Allow-Credentials", "true" } });
                 return true;
             }));
@@ -201,7 +202,7 @@ namespace ComputerAnalytics
             {
                 try
                 {
-                    request.SendString(JsonSerializer.Serialize(collection.GetAllEndpointsWithAssociatedData(request)), "application/json");
+                    request.SendStringReplace(JsonSerializer.Serialize(collection.GetAllEndpointsWithAssociatedData(request)), "application/json", 200, replace);
                 } catch(Exception e)
                 {
                     Logger.Log("Error while crunching data:\n" + e.ToString(), LoggingType.Warning);
@@ -214,7 +215,7 @@ namespace ComputerAnalytics
                 if (IsNotLoggedIn(request)) return true;
                 try
                 {
-                    request.SendString(JsonSerializer.Serialize(collection.GetAllEndpointsSortedByTimeWithAssociatedData(request)), "application/json");
+                    request.SendStringReplace(JsonSerializer.Serialize(collection.GetAllEndpointsSortedByTimeWithAssociatedData(request)), "application/json", 200, replace);
                 }
                 catch (Exception e)
                 {
@@ -228,7 +229,7 @@ namespace ComputerAnalytics
                 if (IsNotLoggedIn(request)) return true;
                 try
                 {
-                    request.SendString(JsonSerializer.Serialize(collection.GetAllScreensWithAssociatedData(request)), "application/json");
+                    request.SendStringReplace(JsonSerializer.Serialize(collection.GetAllScreensWithAssociatedData(request)), "application/json", 200, replace);
                 }
                 catch (Exception e)
                 {
@@ -242,7 +243,7 @@ namespace ComputerAnalytics
                 if (IsNotLoggedIn(request)) return true;
                 try
                 {
-                    request.SendString(JsonSerializer.Serialize(collection.GetAllReferrersWithAssociatedData(request)), "application/json");
+                    request.SendStringReplace(JsonSerializer.Serialize(collection.GetAllReferrersWithAssociatedData(request)), "application/json", 200, replace);
                 }
                 catch (Exception e)
                 {
@@ -257,7 +258,7 @@ namespace ComputerAnalytics
                 if (IsNotLoggedIn(request)) return true;
                 try
                 {
-                    request.SendString(JsonSerializer.Serialize(collection.GetAllHostsWithAssociatedData(request)), "application/json");
+                    request.SendStringReplace(JsonSerializer.Serialize(collection.GetAllHostsWithAssociatedData(request)), "application/json", 200, replace);
                 }
                 catch (Exception e)
                 {
@@ -504,7 +505,7 @@ namespace ComputerAnalytics
                     request.Send403();
                     return true;
                 }
-                request.SendString(Logger.log);
+                request.SendStringReplace(Logger.log, "text/plain", 200, replace);
                 return true;
             }));
             server.AddRoute("POST", "/restart", new Func<ServerRequest, bool>(request =>
@@ -1012,7 +1013,6 @@ namespace ComputerAnalytics
                 documents = database.GetCollection<BsonDocument>(collectionName);
                 if (parentCollection.config.migrateOldDataToMongoDB)
                 {
-                    Logger.Log("Migrating local database to MongoDB");
                     UploadDatabaseToMongoDB();
                 }
             } else
@@ -1030,7 +1030,13 @@ namespace ComputerAnalytics
             long  lastTimeUnix = TimeConverter.DateTimeToUnixTimestamp(lastTime);
             if(parentCollection.config.useMongoDB)
             {
-                foreach (BsonDocument document in documents.Find(new BsonDocument("sideClose", new BsonDocument("$gte", lastTimeUnix))).ToEnumerable())
+                BsonDocument filter = new BsonDocument("sideClose", new BsonDocument("$gte", lastTimeUnix));
+                //if (host != null && d.host != host) return true;
+                if (endpoint != null) filter.Add(new BsonElement("endpoint", endpoint));
+                if (referrer != null) filter.Add(new BsonElement("referrer", referrer));
+                if (screenwidth != null) filter.Add(new BsonElement("screenWidth", screenwidth));
+                if (screenheight != null) filter.Add(new BsonElement("screenHeight", screenheight));
+                foreach (BsonDocument document in documents.Find(filter).ToEnumerable())
                 {
                     yield return BsonSerializer.Deserialize<AnalyticsData>(document);
                 }
@@ -1055,22 +1061,29 @@ namespace ComputerAnalytics
 
         public void UploadDatabaseToMongoDB()
         {
-            if (File.Exists(analyticsDirectory + "migratedTo" + StringFormatter.FileNameSafe(parentCollection.config.mongoDBUrl))) return;
-            int done = 0;
-            foreach (string d in Directory.EnumerateDirectories(analyticsDirectory))
+            Thread t = new Thread(() =>
             {
-                foreach (string f in Directory.EnumerateFiles(d))
+                if (File.Exists(analyticsDirectory + "migratedTo" + StringFormatter.FileNameSafe(parentCollection.config.mongoDBUrl))) return;
+                Logger.Log("Migrating local database to MongoDB");
+                int done = 0;
+                foreach (string d in Directory.EnumerateDirectories(analyticsDirectory))
                 {
-                    
-                    BsonDocument doc = BsonSerializer.Deserialize<BsonDocument>(File.ReadAllText(f));
-                    if (documents.Find<BsonDocument>(doc).CountDocuments() >= 1) continue;
-                    documents.InsertOne(doc);
-                    done++;
-                    if (done % 100 == 0) Logger.Log("Migrated " + done + " files");
+                    if (File.Exists(d + "migratedTo" + StringFormatter.FileNameSafe(parentCollection.config.mongoDBUrl))) continue;
+                    foreach (string f in Directory.EnumerateFiles(d))
+                    {
+
+                        BsonDocument doc = BsonSerializer.Deserialize<BsonDocument>(File.ReadAllText(f));
+                        if (documents.Find<BsonDocument>(doc).CountDocuments() >= 1) continue;
+                        documents.InsertOne(doc);
+                        done++;
+                        if (done % 100 == 0) Logger.Log("Migrated " + done + " files");
+                    }
+                    File.WriteAllText(d + "migratedTo" + StringFormatter.FileNameSafe(parentCollection.config.mongoDBUrl), "");
                 }
-            }
-            Logger.Log("Finished. Migrated " + done + "files");
-            File.WriteAllText(analyticsDirectory + "migratedTo" + StringFormatter.FileNameSafe(parentCollection.config.mongoDBUrl), "");
+                Logger.Log("Finished. Migrated " + done + "files");
+                File.WriteAllText(analyticsDirectory + "migratedTo" + StringFormatter.FileNameSafe(parentCollection.config.mongoDBUrl), "");
+            });
+            t.Start();
         }
 
         public void ReOrderDataFromV1()
@@ -1103,7 +1116,17 @@ namespace ComputerAnalytics
 
         public void AddAnalyticData(AnalyticsData analyticsData)
         {
-            documents.InsertOne(analyticsData.ToBsonDocument());
+            if(parentCollection.config.useMongoDB)
+            {
+                documents.InsertOne(analyticsData.ToBsonDocument());
+                Logger.Log("Added " + analyticsData.fileName + " to MongoDB collection");
+            } else
+            {
+                string f = analyticsDirectory + analyticsData.closeTime.ToString("dd.MM.yyyy") + Path.DirectorySeparatorChar;
+                FileManager.CreateDirectoryIfNotExisting(f);
+                File.WriteAllText(f + analyticsData.fileName, analyticsData.ToString());
+            }
+            
         }
 
         public void DeleteOldAnalytics(TimeSpan maxTime)
@@ -1276,10 +1299,12 @@ namespace ComputerAnalytics
             // Remove screens with fewer than 2 users
             for(int i = 0; i < screensL.Count; i++)
             {
-                if(screensL[i].uniqueIPs <= 1)
+                Logger.Log(screensL.Count + ", " + i);
+                if (screensL[i].uniqueIPs <= 1)
                 {
                     screensL.RemoveAt(i);
                     i--;
+                    continue;
                 }
                 screensL[i].avgDuration = screensL[i].totalDuration / (double)screensL[i].clicks;
             }
@@ -1355,6 +1380,7 @@ namespace ComputerAnalytics
 
         public bool IsNotValid(AnalyticsData d)
         {
+            return false;
             //if (host != null && d.host != host) return true;
             if (endpoint != null && d.endpoint != endpoint) return true;
             if (referrer != null && d.referrer != referrer) return true;
@@ -1492,6 +1518,7 @@ namespace ComputerAnalytics
 
     public class AnalyticsData
     {
+        public ObjectId _id { get; set; } = default(ObjectId);
         public string analyticsVersion { get; set; } = null;
         public string fullUri { get; set; } = null;
         public string fullEndpoint { get; set; } = null;
