@@ -8,6 +8,7 @@ using ComputerUtils.Webserver;
 using MongoDB.Bson;
 using MongoDB.Bson.IO;
 using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
 using System;
 using System.Collections.Generic;
@@ -72,20 +73,13 @@ namespace ComputerAnalytics
         /// <param name="httpServer">server to which you want to add analytics functionality</param>
         public void AddToServer(HttpServer httpServer)
         {
+            AppDomain.CurrentDomain.UnhandledException += HandleExeption;
             Logger.displayLogInConsole = true;
             
             collection = new AnalyticsDatabaseCollection(this);
             this.server = httpServer;
             server.StartServer(collection.config.port);
             Logger.Log("Public address: " + collection.GetPublicAddress());
-            foreach (string s in Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory))
-            {
-                if (s.EndsWith(".zip"))
-                {
-                    Logger.Log("Deleting " + s);
-                    File.Delete(s);
-                }
-            }
             SendMasterWebhookMessage("Server started", "The server has just started", 0x42BBEB);
             Thread warningSystemsAndSiteMetrics = new Thread(() =>
             {
@@ -622,6 +616,11 @@ namespace ComputerAnalytics
             collection.ReorderDataOfAllDataSetsV1();
         }
 
+        public void HandleExeption(object sender, UnhandledExceptionEventArgs args)
+        {
+            SendMasterWebhookMessage("Critical Unhandled Exception", "ComputerAnalytics managed to crash. Well done Developer: " + ((Exception)args.ExceptionObject).ToString().Substring(0, 1900), 0xFF0000);
+        }
+
         public string GetToken(ServerRequest request)
         {
             Cookie token = request.cookies["token"];
@@ -695,7 +694,7 @@ namespace ComputerAnalytics
             this.analyticsDir = analyticsDir;
             Logger.Log("Loading all databases");
             FileManager.CreateDirectoryIfNotExisting(analyticsDir);
-            if (!File.Exists(analyticsDir + "config.json")) SaveConfig();
+            if(!File.Exists(analyticsDir + "config.json")) SaveConfig();
             config = JsonSerializer.Deserialize<Config>(File.ReadAllText(analyticsDir + "config.json"));
             if (config.publicAddress == "") SetPublicAddress("http://localhost");
             if (config.useMongoDB)
@@ -1005,7 +1004,7 @@ namespace ComputerAnalytics
             bool log = Logger.displayLogInConsole;
             Logger.displayLogInConsole = true;
 
-            if(parentCollection.config.useMongoDB)
+            if (parentCollection.config.useMongoDB)
             {
                 
                 Logger.Log("Loading MongoDB Collection");
@@ -1036,10 +1035,13 @@ namespace ComputerAnalytics
                 if (referrer != null) filter.Add(new BsonElement("referrer", referrer));
                 if (screenwidth != null) filter.Add(new BsonElement("screenWidth", screenwidth));
                 if (screenheight != null) filter.Add(new BsonElement("screenHeight", screenheight));
-                foreach (BsonDocument document in documents.Find(filter).ToEnumerable())
+                IEnumerable<BsonDocument> docs = documents.Find(filter).ToEnumerable();
+                foreach (BsonDocument document in docs)
                 {
                     yield return BsonSerializer.Deserialize<AnalyticsData>(document);
                 }
+                filter = null;
+                docs = null;
             } else
             {
                 for (DateTime time = lastTime; time.Date <= DateTime.Now.Date; time = time.AddDays(1))
@@ -1052,15 +1054,17 @@ namespace ComputerAnalytics
                             if (DoesFilenameMatchRequirements(f)) continue;
                             AnalyticsData data = AnalyticsData.Load(f);
                             yield return data;
+                            data = null;
                         }
                     }
                 }
             }
-            
+            GC.Collect();
         }
 
         public void UploadDatabaseToMongoDB()
         {
+            if (!Directory.Exists(analyticsDirectory)) return;
             Thread t = new Thread(() =>
             {
                 if (File.Exists(analyticsDirectory + "migratedTo" + StringFormatter.FileNameSafe(parentCollection.config.mongoDBUrl))) return;
@@ -1165,7 +1169,6 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsEndpoint> endpoints = new Dictionary<string, AnalyticsEndpoint>();
             foreach(AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
-                if (IsNotValid(data)) continue;
                 if (!endpoints.ContainsKey(data.endpoint))
                 {
                     endpoints.Add(data.endpoint, new AnalyticsEndpoint());
@@ -1185,6 +1188,7 @@ namespace ComputerAnalytics
                 }
             }
             List<AnalyticsEndpoint> endpointsL = endpoints.Values.OrderBy(x => x.clicks).ToList();
+            endpoints.Clear();
             endpointsL.ForEach(new Action<AnalyticsEndpoint>(e =>
             {
                 e.avgDuration = e.totalDuration / (double)e.clicks;
@@ -1202,7 +1206,6 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsHost> hosts = new Dictionary<string, AnalyticsHost>();
             foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
-                if (IsNotValid(data)) continue;
                 if (!hosts.ContainsKey(data.host))
                 {
                     hosts.Add(data.host, new AnalyticsHost());
@@ -1219,8 +1222,8 @@ namespace ComputerAnalytics
                     hosts[data.host].ips.Add(data.remote);
                 }
             }
-            
             List<AnalyticsHost> hostsL = hosts.Values.OrderBy(x => x.totalClicks).ToList();
+            hosts.Clear();
             hostsL.ForEach(new Action<AnalyticsHost>(h => {
                 h.endpoints = GetAllEndpointsWithAssociatedData(h.data, queryString);
                 h.avgDuration = h.totalDuration / (double)h.totalClicks;
@@ -1242,7 +1245,6 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsTime> times = new Dictionary<string, AnalyticsTime>();
             foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
-                if (IsNotValid(data)) continue;
                 string date = GetTimeString(data);
                 if(!times.ContainsKey(date))
                 {
@@ -1263,6 +1265,7 @@ namespace ComputerAnalytics
             }
             times = Sorter.Sort(times);
             List<AnalyticsTime> datesL = times.Values.OrderBy(x => x.unix).ToList();
+            times.Clear();
             datesL.ForEach(new Action<AnalyticsTime>(d => {
                 d.avgDuration = d.totalDuration / (double)d.totalClicks;
             }));
@@ -1275,7 +1278,6 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsScreen> screens = new Dictionary<string, AnalyticsScreen>();
             foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
-                if (IsNotValid(data)) continue;
                 string screen = data.screenWidth + "," + data.screenHeight;
                 if (!screens.ContainsKey(screen))
                 {
@@ -1296,10 +1298,10 @@ namespace ComputerAnalytics
             }
             screens = Sorter.Sort(screens);
             List<AnalyticsScreen> screensL = screens.Values.ToList();
+            screens.Clear();
             // Remove screens with fewer than 2 users
             for(int i = 0; i < screensL.Count; i++)
             {
-                Logger.Log(screensL.Count + ", " + i);
                 if (screensL[i].uniqueIPs <= 1)
                 {
                     screensL.RemoveAt(i);
@@ -1319,7 +1321,6 @@ namespace ComputerAnalytics
             Dictionary<string, AnalyticsReferrer> referrers = new Dictionary<string, AnalyticsReferrer>();
             foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
-                if (IsNotValid(data)) continue;
                 if (!referrers.ContainsKey(data.referrer))
                 {
                     referrers.Add(data.referrer, new AnalyticsReferrer(data.referrer));
@@ -1335,6 +1336,7 @@ namespace ComputerAnalytics
                 }
             }
             List<AnalyticsReferrer> referrersL = referrers.Values.OrderBy(x => x.referred).ToList();
+            referrers.Clear();
             referrersL.ForEach(new Action<AnalyticsReferrer>(e => e.avgDuration = e.totalDuration / (double)e.referred));
             return referrersL;
         }
@@ -1516,6 +1518,7 @@ namespace ComputerAnalytics
         }
     }
 
+    [BsonIgnoreExtraElements]
     public class AnalyticsData
     {
         public ObjectId _id { get; set; } = default(ObjectId);

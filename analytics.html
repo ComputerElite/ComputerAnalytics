@@ -82,11 +82,23 @@
             fetch("/analytics/time?" + param.toString()).then(res => res.json().then(json => {
                 var clicks = {x: [], y: [], fill: 'tozeroy', type: "scatter", line: {color: "#1a9c00", width: 3}, name: "clicks", marker: {size: 8}}
                 var users = {x: [], y: [], fill: 'tozeroy', type: "scatter", line: {color: "#00419c", width: 3}, name: "unique ips", marker: {size: 8}}
+                var mostClicks = 0
+                var mostIps = 0
+                var l = param.get("landscape")
+                if(l) {
+                    json.forEach(element => {
+                        if(mostClicks < element.totalClicks) mostClicks = element.totalClicks
+                        if(mostIps < element.totalUniqueIPs) totalUniqueIPs = element.totalUniqueIPs
+                    })
+                }
                 json.forEach(element => {
                     clicks.x.push(element.time)
                     clicks.y.push(element.totalClicks)
                     users.x.push(element.time)
-                    users.y.push(element.totalUniqueIPs)
+                    if(l) users.y.push(mostClicks + 1000 + mostIps - element.totalUniqueIPs)
+                    else {
+                        users.y.push(element.totalUniqueIPs)
+                    }
                 });
                 document.getElementById(trafficDateContainer).innerHTML = ""
                 Plotly.newPlot(trafficDateContainer, [clicks, users], layout)
@@ -98,6 +110,7 @@
                     SetTime(pts)
                 });
             }).catch(e => {
+                console.log(e)
                 Issue(currentReload)
             }))
         }
@@ -229,7 +242,7 @@
         }
 
         function MakeClean(obj) {
-            Object.keys(obj).forEach(key => { obj[key] = obj[key].replaceAll("/</", "") });
+            Object.keys(obj).forEach(key => { obj[key] = obj[key].replaceAll("<", "&lt").replaceAll("<", "&gt") });
             return obj;
         }
     </script>
