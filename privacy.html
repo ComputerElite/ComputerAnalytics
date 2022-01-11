@@ -1,0 +1,49 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
+    <link href='/style.css' rel='stylesheet' type='text/css'>
+    <style>
+        body {
+            font-family: Consolas;
+        }
+    </style>
+</head>
+<body>
+    <div style="display: flex; justify-content: center; flex-direction: column; align-items: center;">
+        <div id="content">
+            Fetching
+        </div>
+    </div>
+    <script>
+        fetch("/privacy.txt").then(res => {
+            res.text().then(res => {
+                var links = []
+                const websiteRegex = /https?\:\/\/([^ ()\n\t]+(\/)?)/g
+                while ((match = websiteRegex.exec(res)) !== null) {
+                    var replacement = `<a href="${match[0]}" target="_blank">${match[0]}</a>`
+                    links.push({
+                        absolute: replacement,
+                        relative: match[0],
+                        start: match.index,
+                        end: websiteRegex.lastIndex
+                    })
+                }
+                var length = 0
+                links.forEach(link => {
+                    res = res.substring(0, link.start + length) + res.substring(link.end + length, res.length)
+                    res = InsertString(link.absolute, link.start + length, res)
+                    length += link.absolute.length - link.relative.length
+                })
+                res = res.replace(/\n/g, "<br>")
+                res = res.replace(/\t/g, "&emsp;&emsp;&emsp;&emsp;")
+                document.getElementById("content").innerHTML = res
+            })
+        })
+
+        function InsertString(toInsert, position, text) {
+            return [text.slice(0, position), toInsert, text.slice(position)].join('')
+        }
+    </script>
+</body>
+</html>

@@ -582,7 +582,13 @@ namespace ComputerAnalytics
             }));
             server.AddRoute("GET", "/privacy", new Func<ServerRequest, bool>(request =>
             {
-                request.Redirect("https://github.com/ComputerElite/ComputerAnalytics/wiki");
+                request.SendString(ReadResource("privacy.html"), "text/html");
+                //request.Redirect("https://github.com/ComputerElite/ComputerAnalytics/wiki");
+                return true;
+            }));
+            server.AddRoute("GET", "/privacy.txt", new Func<ServerRequest, bool>(request =>
+            {
+                request.SendString(ReadResource("privacy.txt").Replace("{0}", collection.config.useMongoDB ? "via MongoDB" : "locally"));
                 return true;
             }));
             server.AddRoute("GET", "/analytics/docs", new Func<ServerRequest, bool>(request =>

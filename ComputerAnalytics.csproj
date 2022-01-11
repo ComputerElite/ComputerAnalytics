@@ -6,6 +6,8 @@
   </PropertyGroup>
   <ItemGroup>
     <None Remove="api.txt" />
+    <None Remove="privacy.html" />
+    <None Remove="privacy.txt" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Text.Json, Version=4.0.1.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL" />
@@ -26,6 +28,8 @@
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="manage.html" />
+    <EmbeddedResource Include="privacy.html" />
+    <EmbeddedResource Include="privacy.txt" />
     <EmbeddedResource Include="style.css" />
     <EmbeddedResource Include="script.js" />
   </ItemGroup>
