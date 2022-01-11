@@ -1,4 +1,5 @@
 ﻿using ComputerUtils.Discord;
+using ComputerUtils.Encryption;
 using ComputerUtils.FileManaging;
 using ComputerUtils.Logging;
 using ComputerUtils.RandomExtensions;
@@ -1250,7 +1251,9 @@ namespace ComputerAnalytics
                 {
                     times.Add(date, new AnalyticsTime());
                     times[date].time = date;
-                    times[date].unix = ((DateTimeOffset)data.openTime).ToUnixTimeSeconds();
+                    if (timeunit == TimeUnit.date) times[date].unix = ((DateTimeOffset)data.openTime.Date).ToUnixTimeSeconds();
+                    else if (timeunit == TimeUnit.hour) times[date].unix = data.openTime.Hour;
+                    else if (timeunit == TimeUnit.minute) times[date].unix = data.openTime.Minute;
                 }
                 times[date].totalClicks++;
                 times[date].data.Add(data);
@@ -1263,7 +1266,6 @@ namespace ComputerAnalytics
                     times[date].ips.Add(data.remote);
                 }
             }
-            times = Sorter.Sort(times);
             List<AnalyticsTime> datesL = times.Values.OrderBy(x => x.unix).ToList();
             times.Clear();
             datesL.ForEach(new Action<AnalyticsTime>(d => {
@@ -1570,7 +1572,7 @@ namespace ComputerAnalytics
                     if (!data.endpoint.EndsWith("/")) data.endpoint += "/";
                     data.host = new Uri(data.fullUri).Host;
                     data.uA = request.context.Request.UserAgent;
-                    data.remote = request.context.Request.Headers["X-Forwarded-For"] == null ? request.context.Request.RemoteEndPoint.Address.ToString() : request.context.Request.Headers["X-Forwarded-For"];
+                    data.remote = Hasher.GetSHA256OfString(request.context.Request.Headers["X-Forwarded-For"] == null ? request.context.Request.RemoteEndPoint.Address.ToString() : request.context.Request.Headers["X-Forwarded-For"]);
                     data.duration = data.sideClose - data.sideOpen;
                     if (data.duration < 0) throw new Exception("Some idiot made a manual request with negative duration.");
                     data.openTime = TimeConverter.UnixTimeStampToDateTime(data.sideOpen);
