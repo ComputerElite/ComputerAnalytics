@@ -205,6 +205,19 @@ namespace ComputerAnalytics
                 }
                 return true;
             }));
+            server.AddRoute("GET", "/analytics/countries", new Func<ServerRequest, bool>(request =>
+            {
+                try
+                {
+                    request.SendStringReplace(JsonSerializer.Serialize(collection.GetAllCountriesWithAssociatedData(request)), "application/json", 200, replace);
+                }
+                catch (Exception e)
+                {
+                    Logger.Log("Error while crunching data:\n" + e.ToString(), LoggingType.Warning);
+                    request.SendString("Error: " + e.Message, "text/plain", 500);
+                }
+                return true;
+            }));
             server.AddRoute("GET", "/analytics/time", new Func<ServerRequest, bool>(request =>
             {
                 if (IsNotLoggedIn(request)) return true;
@@ -588,7 +601,7 @@ namespace ComputerAnalytics
             }));
             server.AddRoute("GET", "/privacy.txt", new Func<ServerRequest, bool>(request =>
             {
-                request.SendString(ReadResource("privacy.txt").Replace("{0}", collection.config.useMongoDB ? "via MongoDB" : "locally"));
+                request.SendString(ReadResource("privacy.txt").Replace("{0}", collection.config.useMongoDB ? "via MongoDB" : "locally").Replace("{1}", collection.config.geoLocationEnabled ? "cand to check from which country the most visitors are" : ""));
                 return true;
             }));
             server.AddRoute("GET", "/analytics/docs", new Func<ServerRequest, bool>(request =>
@@ -954,6 +967,16 @@ namespace ComputerAnalytics
             return databases[i].GetAllEndpointsWithAssociatedData(null, queryString);
         }
 
+        public List<AnalyticsCountry> GetAllCountriesWithAssociatedData(ServerRequest request)
+        {
+            string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
+            NameValueCollection queryString = request.queryString;
+            int i = GetDatabaseIndexWithPrivateToken(privateToken);
+            if (i == -1) return new List<AnalyticsCountry>();
+            Logger.Log("Crunching Countries of database for " + config.Websites[i].url + " just because there are so many countries");
+            return databases[i].GetAllCountriesWithAssociatedData(null, queryString);
+        }
+
         public List<AnalyticsHost> GetAllHostsWithAssociatedData(ServerRequest request)
         {
             string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
@@ -1042,6 +1065,7 @@ namespace ComputerAnalytics
                 if (referrer != null) filter.Add(new BsonElement("referrer", referrer));
                 if (screenwidth != null) filter.Add(new BsonElement("screenWidth", screenwidth));
                 if (screenheight != null) filter.Add(new BsonElement("screenHeight", screenheight));
+                if (countryCode != null) filter.Add(new BsonElement("geolocation.countryCode", countryCode));
                 IEnumerable<BsonDocument> docs = documents.Find(filter).ToEnumerable();
                 foreach (BsonDocument document in docs)
                 {
@@ -1060,6 +1084,7 @@ namespace ComputerAnalytics
                         {
                             if (DoesFilenameMatchRequirements(f)) continue;
                             AnalyticsData data = AnalyticsData.Load(f);
+                            if (IsNotValid(data)) continue;
                             yield return data;
                             data = null;
                         }
@@ -1205,6 +1230,41 @@ namespace ComputerAnalytics
                 }
             }));
             return endpointsL;
+        }
+
+        public List<AnalyticsCountry> GetAllCountriesWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
+        {
+            PreCalculate(queryString);
+            Dictionary<string, AnalyticsCountry> countries = new Dictionary<string, AnalyticsCountry>();
+            foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
+            {
+                if (!countries.ContainsKey(data.geolocation.countryCode))
+                {
+                    countries.Add(data.geolocation.countryCode, new AnalyticsCountry());
+                    countries[data.geolocation.countryCode].countryCode = data.geolocation.countryCode;
+                }
+                countries[data.geolocation.countryCode].clicks++;
+                countries[data.geolocation.countryCode].totalDuration += data.duration;
+                if (countries[data.geolocation.countryCode].maxDuration < data.duration) countries[data.geolocation.countryCode].maxDuration = data.duration;
+                if (countries[data.geolocation.countryCode].minDuration > data.duration) countries[data.geolocation.countryCode].minDuration = data.duration;
+                countries[data.geolocation.countryCode].data.Add(data);
+                if (!countries[data.geolocation.countryCode].ips.Contains(data.remote))
+                {
+                    countries[data.geolocation.countryCode].uniqueIPs++;
+                    countries[data.geolocation.countryCode].ips.Add(data.remote);
+                }
+            }
+            List<AnalyticsCountry> countriesL = countries.Values.OrderBy(x => x.clicks).ToList();
+            countries.Clear();
+            countriesL.ForEach(new Action<AnalyticsCountry>(e =>
+            {
+                e.avgDuration = e.totalDuration / (double)e.clicks;
+                if (deep)
+                {
+                    e.referrers = GetAllReferrersWithAssociatedData(e.data, queryString);
+                }
+            }));
+            return countriesL;
         }
 
         public List<AnalyticsHost> GetAllHostsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
@@ -1358,6 +1418,7 @@ namespace ComputerAnalytics
         public TimeUnit timeunit = TimeUnit.date;
         public string[] time = null;
         public bool deep = false;
+        public string countryCode = null;
 
         public int days = 0;
         public int hours = 0;
@@ -1377,6 +1438,7 @@ namespace ComputerAnalytics
             timeunit = (TimeUnit)Enum.Parse(typeof(TimeUnit), c.Get("timeunit") == null ? "date" : c.Get("timeunit").ToLower());
             time = c.Get("time") == null ? null : c.Get("time").Split(',');
             deep = c.Get("deep") != null;
+            countryCode = c.Get("countrycode") == null ? null : c.Get("countrycode").ToLower();
 
             hours = c.Get("hours") != null && Regex.IsMatch(c.Get("hours"), "[0-9]+") ? Convert.ToInt32(c.Get("hours")) : 0;
             minutes = c.Get("minutes") != null && Regex.IsMatch(c.Get("minutes"), "[0-9]+") ? Convert.ToInt32(c.Get("minutes")) : 0;
@@ -1384,21 +1446,18 @@ namespace ComputerAnalytics
             days = c.Get("days") != null && Regex.IsMatch(c.Get("days"), "[0-9]+") ? Convert.ToInt32(c.Get("days")) : 0;
 
             if (days == 0 && hours == 0 && minutes == 0 && seconds == 0) days = 7;
-            
-            Logger.Log(days + " " + hours + " " + minutes + " " + seconds);
         }
 
         public bool IsNotValid(AnalyticsData d)
         {
-            return false;
-            //if (host != null && d.host != host) return true;
             if (endpoint != null && d.endpoint != endpoint) return true;
+            if (countryCode != null && d.geolocation.countryCode != countryCode) return true;
             if (referrer != null && d.referrer != referrer) return true;
             if (screenwidth != null && d.screenWidth.ToString() != screenwidth) return true;
             if (screenheight != null && d.screenHeight.ToString() != screenheight) return true;
             if (time != null && !time.Contains(GetTimeString(d))) return true;
 
-            return false;
+            return IsTimeSpanNotValid(now - d.closeTime);
         }
 
         public bool IsTimeSpanNotValid(TimeSpan span)
@@ -1510,6 +1569,21 @@ namespace ComputerAnalytics
         public List<string> ips = new List<string>();
     }
 
+    public class AnalyticsCountry
+    {
+        public string countryCode { get; set; } = "";
+        public long clicks { get; set; } = 0;
+        public long minDuration { get; set; } = long.MaxValue;
+        public long maxDuration { get; set; } = 0;
+        public double avgDuration { get; set; } = 0.0;
+        public long totalDuration { get; set; } = 0;
+        public long uniqueIPs { get; set; } = 0;
+
+        public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
+        public List<AnalyticsData> data = new List<AnalyticsData>();
+        public List<string> ips = new List<string>();
+    }
+
     public class AnalyticsResponse
     {
         public string type { get; set; } = "success";
@@ -1545,8 +1619,9 @@ namespace ComputerAnalytics
         public long duration { get; set; } = 0; // seconds
         public string token { get; set; } = "";
         public string fileName { get; set; } = null;
-        public long screenWidth { get; set; } = 0;// unix
-        public long screenHeight { get; set; } = 0;// unix
+        public long screenWidth { get; set; } = 0;
+        public long screenHeight { get; set; } = 0;
+        public AnonymisedGeoLocationQueryResponse geolocation { get; set; } = new AnonymisedGeoLocationQueryResponse();
 
         public override bool Equals(object obj)
         {
@@ -1571,14 +1646,16 @@ namespace ComputerAnalytics
             switch(data.analyticsVersion)
             {
                 case "1.0":
+                    string ip = request.context.Request.Headers["X-Forwarded-For"] == null ? request.context.Request.RemoteEndPoint.Address.ToString() : request.context.Request.Headers["X-Forwarded-For"];
                     // data.endpoint = request.path; idiot, this will return /analytics
+                    data.geolocation = GeoLocationClient.GetAnonymisedGeoLocation(ip);
                     data.fullUri = data.fullUri.Split('?')[0];
                     data.fullEndpoint = new Uri(data.fullUri).AbsolutePath;
                     data.endpoint = data.fullEndpoint.Substring(0, data.fullEndpoint.LastIndexOf("?") == -1 ? data.fullEndpoint.Length : data.fullEndpoint.LastIndexOf("?"));
                     if (!data.endpoint.EndsWith("/")) data.endpoint += "/";
                     data.host = new Uri(data.fullUri).Host;
                     data.uA = request.context.Request.UserAgent;
-                    data.remote = Hasher.GetSHA256OfString(request.context.Request.Headers["X-Forwarded-For"] == null ? request.context.Request.RemoteEndPoint.Address.ToString() : request.context.Request.Headers["X-Forwarded-For"]);
+                    data.remote = Hasher.GetSHA256OfString(ip);
                     data.duration = data.sideClose - data.sideOpen;
                     if (data.duration < 0) throw new Exception("Some idiot made a manual request with negative duration.");
                     data.openTime = TimeConverter.UnixTimeStampToDateTime(data.sideOpen);

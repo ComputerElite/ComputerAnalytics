@@ -12,6 +12,10 @@
         <div><input type="number" id="hours"> Hours</div>
         <div><input type="number" id="minutes"> Minutes</div>
         <div><input type="number" id="seconds"> Seconds</div>
+        <h1>Active filters</h1>
+        <div style="display: flex; flex-wrap: wrap; width: 100%;" id="filters">
+        
+        </div>
         <h1>
             <select id="timeUnit">
                 <option value="date">Date</option>
@@ -24,6 +28,10 @@
         </div>
         <h1>Endpoints</h1>
         <div id="endpoints" style="display: flex; flex-wrap: wrap; width: 100%;">
+            <div class="loading"></div>
+        </div>
+        <h1>Countries</h1>
+        <div id="countries" style="display: flex; flex-wrap: wrap; width: 100%;">
             <div class="loading"></div>
         </div>
         <h1>Referrers</h1>
@@ -42,6 +50,10 @@
         const param = new URLSearchParams(window.location.search)
         const referrers = document.getElementById("referrers")
         const queryString = document.getElementById("querystring")
+
+        param.forEach((v, k) => {
+            document.getElementById("filters").innerHTML += `<div>${k}: ${v}</div>`
+        })
 
         document.getElementById("days").value = param.get("days")
         document.getElementById("hours").value = param.get("hours")
@@ -118,6 +130,10 @@
             param.set("endpoint", endpoint)
             Reload()
         }
+        function SetCountry(country) {
+            param.set("countrycode", country)
+            Reload()
+        }
         function SetReferrer(referrer) {
             param.set("referrer", referrer)
             Reload()
@@ -165,6 +181,30 @@
                                 </div>`
                 })
                 document.getElementById("endpoints").innerHTML += endpoints
+            }).catch(e => {
+                Issue(currentReload)
+            }))
+            fetch("/analytics/countries?" + param.toString()).then(res => res.json().then(json => {
+                document.getElementById("countries").innerHTML = ""
+                var countries = ""
+                json.sort((a, b) => {
+                    if (a.clicks < b.clicks) return 1;
+                    if (a.clicks > b.clicks) return -1;
+                    return 0;
+                })
+                totalClicks = 0
+                json.forEach(e => {
+                    totalClicks += e.clicks
+                })
+                json.forEach(e => {
+                    countries += `<div style="display: flex; flex-direction: column; border: #EEEEEE 1px solid; min-width: 24%; padding: 5px;" onclick="SetCountry('${e.countryCode}')">
+                                    <a style="font-weight: bold;" href="${e.fullUri}">${e.countryCode}</a>
+                                    <div>${e.clicks} clicks (${Math.round(e.clicks / totalClicks * 10000) / 100} %)</div>
+                                    <div>${e.uniqueIPs} unique IPs</div>
+                                    <div>avg. ${ToElapsed(e.avgDuration)} min per visit</div>
+                                </div>`
+                })
+                document.getElementById("countries").innerHTML += countries
             }).catch(e => {
                 Issue(currentReload)
             }))

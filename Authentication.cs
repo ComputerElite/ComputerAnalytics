@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace ComputerAnalytics
@@ -20,6 +21,7 @@ namespace ComputerAnalytics
         public string mongoDBUrl { get; set; } = "";
         public bool useMongoDB { get; set; } = false;
         public bool migrateOldDataToMongoDB { get; set; } = false;
+        public bool geoLocationEnabled { get; set; } = true;
         public string mongoDBName { get; set; } = "ComputerAnalytics";
     }
 
