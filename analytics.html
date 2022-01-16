@@ -49,7 +49,7 @@
         const imp = document.getElementById("import")
         const param = new URLSearchParams(window.location.search)
         const queryString = document.getElementById("querystring")
-        var regionNames = new Intl.DisplayNames([navigator.language || navigator.userLanguage], {type: 'region'});
+        var regionNames = new Intl.DisplayNames(["en"], {type: 'region'});
 
         param.forEach((v, k) => {
             document.getElementById("filters").innerHTML += `<div>${k}: ${v}</div>`
