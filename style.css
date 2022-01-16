@@ -30,12 +30,34 @@ a {
     margin: 10px;
     
 }
+
+
 .left {
     padding-right: 20px;
 }
 .right {
-    border-left: #525252 2px solid;
+    border-left: #EEEEEE 2px solid;
     padding-left: 20px;
+}
+
+table {
+    width: 100vw;
+    background-color: #111111;
+    border-radius: 20px;
+    padding: 20px;
+}
+
+.top {
+    font-weight: bold;
+    border-bottom: solid 3px #EEEEEE;
+}
+
+td {
+    border-right: solid 2px #7c7c7c;
+    padding: 5px;
+    width: max-content;
+    overflow-y: hidden;
+    max-width: 80vw;
 }
 
 .lds-ellipsis {

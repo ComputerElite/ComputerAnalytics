@@ -27,29 +27,29 @@
             <div class="loading"></div>
         </div>
         <h1>Endpoints</h1>
-        <div id="endpoints" style="display: flex; flex-wrap: wrap; width: 100%;">
-            <div class="loading"></div>
-        </div>
+        <table id="endpoints" style="display: flex; flex-wrap: wrap; width: 100%;">
+            <tr><td><div class="loading"></div></td></tr>
+        </table>
         <h1>Countries</h1>
-        <div id="countries" style="display: flex; flex-wrap: wrap; width: 100%;">
-            <div class="loading"></div>
-        </div>
+        <table id="countries" style="display: flex; flex-wrap: wrap; width: 100%;">
+            <tr><td><div class="loading"></div></td></tr>
+        </table>
         <h1>Referrers</h1>
-        <div id="referrers" style="display: flex; flex-wrap: wrap; width: 100%;">
-            <div class="loading"></div>
-        </div>
+        <table id="referrers" style="display: flex; flex-wrap: wrap; width: 100%;">
+            <tr><td><div class="loading"></div></td></tr>
+        </table>
         <h1>Screens</h1>
-        <div id="screens" style="display: flex; flex-wrap: wrap; width: 100%;">
-            <div class="loading"></div>
-        </div>
+        <table id="screens" style="flex-wrap: wrap; width: 100%;">
+            <tr><td><div class="loading"></div></td></tr>
+        </table>
     </div>
     <script src="/script.js"></script>
     <script>
         const trafficDateContainer = "trafficDateContainer"
         const imp = document.getElementById("import")
         const param = new URLSearchParams(window.location.search)
-        const referrers = document.getElementById("referrers")
         const queryString = document.getElementById("querystring")
+        var regionNames = new Intl.DisplayNames([navigator.language || navigator.userLanguage], {type: 'region'});
 
         param.forEach((v, k) => {
             document.getElementById("filters").innerHTML += `<div>${k}: ${v}</div>`
@@ -161,8 +161,13 @@
         function ReloadAllData() {
             var currentReload = reloaded
             fetch("/analytics/endpoints?" + param.toString()).then(res => res.json().then(json => {
-                document.getElementById("endpoints").innerHTML = ""
-                var endpoints = ""
+                var endpoints = `<tr>
+                                    <td class="top">Endpoint</td>
+                                    <td class="top">Clicks</td>
+                                    <td class="top">Clicks %</td>
+                                    <td class="top">Users</td>
+                                    <td class="top">avg. time on site</td>
+                                </tr>`
                 json.sort((a, b) => {
                     if (a.clicks < b.clicks) return 1;
                     if (a.clicks > b.clicks) return -1;
@@ -173,20 +178,26 @@
                     totalClicks += e.clicks
                 })
                 json.forEach(e => {
-                    endpoints += `<div style="display: flex; flex-direction: column; border: #EEEEEE 1px solid; min-width: 24%; padding: 5px;" onclick="SetEndpoint('${e.endpoint}')">
-                                    <a style="font-weight: bold;" href="${e.fullUri}">${e.endpoint}</a>
-                                    <div>${e.clicks} clicks (${Math.round(e.clicks / totalClicks * 10000) / 100} %)</div>
-                                    <div>${e.uniqueIPs} unique IPs</div>
-                                    <div>avg. ${ToElapsed(e.avgDuration)} min per visit</div>
-                                </div>`
+                    endpoints += `<tr style="padding: 5px;" onclick="SetEndpoint('${e.endpoint}')">
+                                    <td><a style="font-weight: bold;" href="${e.fullUri}">${e.endpoint}</a></td>
+                                    <td class="clicks">${e.clicks}</td>
+                                    <td class="clickspercent">${Math.round(e.clicks / totalClicks * 10000) / 100} %</td>
+                                    <td class="ips">${e.uniqueIPs}</td>
+                                    <td>${ToElapsed(e.avgDuration)} min</td>
+                                </tr>`
                 })
-                document.getElementById("endpoints").innerHTML += endpoints
+                document.getElementById("endpoints").innerHTML = endpoints
             }).catch(e => {
                 Issue(currentReload)
             }))
             fetch("/analytics/countries?" + param.toString()).then(res => res.json().then(json => {
-                document.getElementById("countries").innerHTML = ""
-                var countries = ""
+                var countries = `<tr>
+                                    <td class="top">Country</td>
+                                    <td class="top">Clicks</td>
+                                    <td class="top">Clicks %</td>
+                                    <td class="top">Users</td>
+                                    <td class="top">avg. time on site</td>
+                                </tr>`
                 json.sort((a, b) => {
                     if (a.clicks < b.clicks) return 1;
                     if (a.clicks > b.clicks) return -1;
@@ -197,36 +208,55 @@
                     totalClicks += e.clicks
                 })
                 json.forEach(e => {
-                    countries += `<div style="display: flex; flex-direction: column; border: #EEEEEE 1px solid; min-width: 24%; padding: 5px;" onclick="SetCountry('${e.countryCode}')">
-                                    <a style="font-weight: bold;" href="${e.fullUri}">${e.countryCode}</a>
-                                    <div>${e.clicks} clicks (${Math.round(e.clicks / totalClicks * 10000) / 100} %)</div>
-                                    <div>${e.uniqueIPs} unique IPs</div>
-                                    <div>avg. ${ToElapsed(e.avgDuration)} min per visit</div>
-                                </div>`
+                    e.country = "unknown"
+                    if(e.countryCode != "") e.country = regionNames.of(e.countryCode.toUpperCase())
+                    countries += `<tr style="padding: 5px;" onclick="SetCountry('${e.countryCode}')">
+                                    <td>${e.country}</td>
+                                    <td class="clicks">${e.clicks}</td>
+                                    <td class="clickspercent">${Math.round(e.clicks / totalClicks * 10000) / 100} %</td>
+                                    <td class="ips">${e.uniqueIPs}</td>
+                                    <td>${ToElapsed(e.avgDuration)} min</td>
+                                </tr>`
                 })
-                document.getElementById("countries").innerHTML += countries
+                document.getElementById("countries").innerHTML = countries
             }).catch(e => {
                 Issue(currentReload)
             }))
             fetch("/analytics/screen?" + param.toString()).then(res => res.json().then(json => {
-                document.getElementById("screens").innerHTML = ""
+                var screens = `<tr>
+                                    <td class="top">Screen size</td>
+                                    <td class="top">Clicks</td>
+                                    <td class="top">Clicks %</td>
+                                    <td class="top">Users</td>
+                                    <td class="top">avg. time on site</td>
+                                </tr>`
                 var total = 0
                 json.forEach(e => {
                     total += e.clicks
                 })
                 json.forEach(e => {
-                    document.getElementById("screens").innerHTML += `<div style="display: flex; flex-direction: column; border: #EEEEEE 1px solid; min-width: 24%; padding: 5px;" onclick="SetScreen('${e.screenWidth}', '${e.screenHeight}')">
-                                    <div style="font-weight: bold;">${e.screenWidth} x ${e.screenHeight}</div>
-                                    <div>${e.clicks} clicks (${Math.round(e.clicks / total * 10000) / 100} %)</div>
-                                    <div>${e.uniqueIPs} unique IPs</div>
-                                    <div>avg. ${ToElapsed(e.avgDuration)} min per visit</div>
-                                </div>`
+                    if(e.screenWidth == "") e.screenWidth = "unknown"
+                    if(e.screenHeight == "") e.screenHeight = "unknown"
+                    screens  += `<tr style="padding: 5px;" onclick="SetScreen('${e.screenWidth}', '${e.screenHeight}')">
+                                    <td>${e.screenWidth} x ${e.screenHeight}</td>
+                                    <td class="clicks">${e.clicks}</td>
+                                    <td class="clickspercent">${Math.round(e.clicks / total * 10000) / 100} %</td>
+                                    <td class="ips">${e.uniqueIPs}</td>
+                                    <td>${ToElapsed(e.avgDuration)} min</td>
+                                </tr>`
                 });
+                document.getElementById("screens").innerHTML = screens
             }).catch(e => {
                 Issue(currentReload)
             }))
             fetch("/analytics/referrers?" + param.toString()).then(res => res.json().then(json => {
-                referrers.innerHTML = ""
+                var ref = `<tr>
+                                <td class="top">Referrer</td>
+                                <td class="top">Clicks</td>
+                                <td class="top">Clicks %</td>
+                                <td class="top">Users</td>
+                                <td class="top">avg. time on site</td>
+                            </tr>`
                 var total = 0
                 json.sort((a, b) => {
                     if (a.referred < b.referred) return 1;
@@ -237,13 +267,18 @@
                     total += e.referred
                 });
                 json.forEach(e => {
-                    referrers.innerHTML += `<div style="display: flex; flex-direction: column; border: #EEEEEE 1px solid; min-width: 24%; padding: 5px;" onclick="SetReferrer('${e.uri}')">
-                                        <a style="font-weight: bold;" href="${e.uri}">${e.uri == "" ? "none" : e.uri}</a>
-                                        <div>${e.referred} times referred (${Math.round(e.referred / total * 10000) / 100} %)</div>
-                                        <div>${e.uniqueIPs} unique IPs</div>
-                                        <div>avg. ${ToElapsed(e.avgDuration)} min per visit</div>
-                                    </div>`
+                    e.address = "none"
+                    if(e.uri != "") e.address = `<a href="${e.uri}">${e.uri}</a>`
+                    ref += `<tr style="padding: 5px;" onclick="SetReferrer('${e.uri}')">
+                                    <td>${e.address}</td>
+                                    <td class="clicks">${e.referred}</td>
+                                    <td class="clickspercent">${Math.round(e.referred / total * 10000) / 100} %</td>
+                                    <td class="ips">${e.uniqueIPs}</td>
+                                    <td>${ToElapsed(e.avgDuration)} min</td>
+                                </tr>`
+                    
                 });
+                document.getElementById("referrers").innerHTML = ref
             }).catch(e => {
                 Issue(currentReload)
             }))
