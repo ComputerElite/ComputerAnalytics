@@ -1,4 +1,5 @@
-﻿using ComputerUtils.Discord;
+﻿using ComputerUtils.CommandLine;
+using ComputerUtils.Discord;
 using ComputerUtils.Encryption;
 using ComputerUtils.FileManaging;
 using ComputerUtils.Logging;
@@ -32,7 +33,17 @@ namespace ComputerAnalytics
     {
         static void Main(string[] args)
         {
-            if(args.Length >= 1 && args[0] == "update")
+            CommandLineCommandContainer cla = new CommandLineCommandContainer(args);
+            cla.AddCommandLineArgument(new List<string> { "--workingdir" }, false, "Sets the working Directory for ComputerAnalytics", "directory", "");
+            cla.AddCommandLineArgument(new List<string> { "update", "--update", "-U" }, true, "Starts in update mode (use with caution. It's best to let it do on it's own)");
+            if (cla.HasArgument("help"))
+            {
+                cla.ShowHelp();
+                return;
+            }
+
+            string workingDir = cla.GetValue("--workingdir");
+            if (cla.HasArgument("update"))
             {
                 Logger.Log("Replacing everything with zip contents.");
                 Thread.Sleep(1000);
@@ -50,13 +61,14 @@ namespace ComputerAnalytics
                 ProcessStartInfo i = new ProcessStartInfo
                 {
                     FileName = "dotnet",
-                    Arguments = "\"" + destDir + "ComputerAnalytics.dll\"",
+                    Arguments = "\"" + destDir + "ComputerAnalytics.dll\" --workingdir \"" + workingDir + "\"",
                     UseShellExecute = true
                 };
                 Process.Start(i);
                 Environment.Exit(0);
             }
             AnalyticsServer s = new AnalyticsServer();
+            s.workingDir = workingDir;
             HttpServer server = new HttpServer();
             s.AddToServer(server);
         }
@@ -67,6 +79,7 @@ namespace ComputerAnalytics
         public HttpServer server = null;
         public AnalyticsDatabaseCollection collection = null;
         public Dictionary<string, string> replace = new Dictionary<string,string> { { "<", ""}, { ">", ""}, { "\\u003C", "" }, { "\\u003E", "" } };
+        public string workingDir = "";
 
         /// <summary>
         /// Adds analytics functionality to a existing server
@@ -76,7 +89,12 @@ namespace ComputerAnalytics
         {
             AppDomain.CurrentDomain.UnhandledException += HandleExeption;
             Logger.displayLogInConsole = true;
-            
+
+            if (!workingDir.EndsWith(Path.DirectorySeparatorChar)) workingDir += Path.DirectorySeparatorChar;
+            if (workingDir == Path.DirectorySeparatorChar.ToString()) workingDir = AppDomain.CurrentDomain.BaseDirectory;
+
+            Logger.Log("Working directory is " + workingDir);
+            Logger.Log("Analytics directory is " + workingDir + "analytics");
             collection = new AnalyticsDatabaseCollection(this);
             this.server = httpServer;
             server.StartServer(collection.config.port);
@@ -403,7 +421,7 @@ namespace ComputerAnalytics
                     request.Send403();
                     return true;
                 }
-                string filename = "export.zip";
+                string filename = workingDir + "export.zip";
                 request.SendString("the zip is being generated. Check /export to get the file once it's available");
                 //request.SendString("requested export. Please head to /export");
                 Logger.Log("Exporting all data as zip. This may take a minute to do");
@@ -427,7 +445,7 @@ namespace ComputerAnalytics
                     request.Send403();
                     return true;
                 }
-                if(!File.Exists("export.zip"))
+                if(!File.Exists(workingDir + "export.zip"))
                 {
                     request.SendString("File does not exist yet. Please refresh this site in a bit or request a new export zip from /requestexport", "text/plain", 425);
                     return true;
@@ -436,8 +454,8 @@ namespace ComputerAnalytics
                 Logger.Log("Sending zip");
                 try
                 {
-                    request.SendFile("export.zip");
-                    File.Delete("export.zip");
+                    request.SendFile(workingDir + "export.zip");
+                    File.Delete(workingDir + "export.zip");
                 } catch { request.SendString("File exists but isn't ready. Please refresh this site in a bit or request a new export zip from /requestexport", "text/plain", 425); }
                 return true;
             }));
@@ -452,7 +470,7 @@ namespace ComputerAnalytics
                 Process currentProcess = Process.GetCurrentProcess();
                 m.ramUsage = currentProcess.WorkingSet64;
                 m.ramUsageString = SizeConverter.ByteSizeToString(m.ramUsage);
-                m.workingDirectory = AppDomain.CurrentDomain.BaseDirectory;
+                m.workingDirectory = workingDir;
                 request.SendString(JsonSerializer.Serialize(m), "application/json");
                 return true;
             }));
@@ -473,21 +491,21 @@ namespace ComputerAnalytics
                     request.Send403();
                     return true;
                 }
-                FileManager.RecreateDirectoryIfExisting("updater");
+                FileManager.RecreateDirectoryIfExisting(AppDomain.CurrentDomain.BaseDirectory + "updater");
                 SendMasterWebhookMessage("ComputerAnalytics Update Deployed", "**Changelog:** `" + (request.queryString.Get("changelog") == null ? "none" : request.queryString.Get("changelog")) + "`", 0x42BBEB);
-                string zip = "updater" + Path.DirectorySeparatorChar + "update.zip";
+                string zip = AppDomain.CurrentDomain.BaseDirectory + "updater" + Path.DirectorySeparatorChar + "update.zip";
                 File.WriteAllBytes(zip, request.bodyBytes);
                 foreach(string s in Directory.GetFiles(AppDomain.CurrentDomain.BaseDirectory))
                 {
                     if (s.EndsWith("zip")) continue;
                     Logger.Log("Copying " + s);
-                    File.Copy(s, "updater" + Path.DirectorySeparatorChar + Path.GetFileName(s), true);
+                    File.Copy(s, AppDomain.CurrentDomain.BaseDirectory + "updater" + Path.DirectorySeparatorChar + Path.GetFileName(s), true);
                 }
                 //Logger.Log("dotnet \"" + AppDomain.CurrentDomain.BaseDirectory + "updater" + Path.DirectorySeparatorChar + "ComputerAnalytics.dll\" update");
                 request.SendString("Starting update. Please wait a bit and come back.");
                 ProcessStartInfo i = new ProcessStartInfo
                 {
-                    Arguments = "\"" + AppDomain.CurrentDomain.BaseDirectory + "updater" + Path.DirectorySeparatorChar + "ComputerAnalytics.dll\" update",
+                    Arguments = "\"" + AppDomain.CurrentDomain.BaseDirectory + "updater" + Path.DirectorySeparatorChar + "ComputerAnalytics.dll\" update --workingdir \"" + workingDir.Substring(0, workingDir.Length - 1) + "\"",
                     UseShellExecute = true,
                     FileName = "dotnet"
                 };
@@ -632,7 +650,7 @@ namespace ComputerAnalytics
                 return true;
             }));
             // Do all stuff after server setup
-            collection.LoadAllDatabases();
+            collection.LoadAllDatabases(workingDir + "analytics");
             collection.ReorderDataOfAllDataSetsV1();
         }
 
