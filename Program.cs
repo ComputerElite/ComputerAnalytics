@@ -1180,13 +1180,13 @@ namespace ComputerAnalytics
             {
                 documents.InsertOne(analyticsData.ToBsonDocument());
                 Logger.Log("Added " + analyticsData.fileName + " to MongoDB collection");
+                return;
             } else
             {
                 string f = analyticsDirectory + analyticsData.closeTime.ToString("dd.MM.yyyy") + Path.DirectorySeparatorChar;
                 FileManager.CreateDirectoryIfNotExisting(f);
                 File.WriteAllText(f + analyticsData.fileName, analyticsData.ToString());
             }
-            
         }
 
         public void DeleteOldAnalytics(TimeSpan maxTime)
@@ -1219,7 +1219,7 @@ namespace ComputerAnalytics
             */
         }
 
-        public BsonDocument GetFilter()
+        public BsonDocument GetFilter(BsonElement[] filters = null)
         {
             DateTime lastTime = DateTime.Now - new TimeSpan(days, hours, minutes, seconds);
             Logger.Log("Gettings Filter from " + lastTime.ToString() + " to " + DateTime.Now);
@@ -1230,15 +1230,19 @@ namespace ComputerAnalytics
             if (referrer != null) filter.Add(new BsonElement("referrer", referrer));
             if (screenwidth != null) filter.Add(new BsonElement("screenWidth", screenwidth));
             if (screenheight != null) filter.Add(new BsonElement("screenHeight", screenheight));
+            if(filters != null)
+            {
+                foreach (BsonElement filterElement in filters) filter.Add(filterElement);
+            }
             if (countryCode != null) filter.Add(new BsonElement("geolocation.countryCode", countryCode));
             return new BsonDocument("$match", filter);
         }
 
-        public BsonDocument[] GetGroupQuery(BsonDocument id, BsonDocument returnId)
+        public BsonDocument[] GetGroupQuery(BsonDocument id, BsonDocument returnId, BsonElement[] filter = null)
         {
             return new BsonDocument[]
                 {
-                    GetFilter(),
+                    GetFilter(filter),
                     new BsonDocument("$group",
                         new BsonDocument
                             {
@@ -1284,19 +1288,6 @@ namespace ComputerAnalytics
             PreCalculate(queryString);
             if(parentCollection.config.useMongoDB)
             {
-                Logger.Log(GetGroupQuery(new BsonDocument
-                                {
-                                    { "remote", "$remote" },
-                                    { "endpoint", "$endpoint" },
-                                    { "host", "$host" },
-                                    { "fullUri", "$fullUri" }
-                                },
-                                new BsonDocument
-                                {
-                                    { "endpoint", "$_id.endpoint" },
-                                    { "host", "$_id.host" },
-                                    { "fullUri", "$_id.fullUri" }
-                                }).ToJson());
                 return documents.Aggregate<AnalyticsAggregationQueryResult<AnalyticsEndpointId>>(GetGroupQuery(new BsonDocument
                                 {
                                     { "remote", "$remote" },
@@ -1353,7 +1344,7 @@ namespace ComputerAnalytics
                                 new BsonDocument
                                 {
                                     { "countryCode", "$_id.countryCode" }
-                                })).ToList();
+                                }, new BsonElement[] {new BsonElement("geolocation",new BsonDocument("$exists", true)), new BsonElement("geolocation.countryCode", new BsonDocument("$exists", true)) })).ToList();
             }
             Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsCountryId>> countries = new Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsCountryId>>();
             foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
@@ -1626,178 +1617,5 @@ namespace ComputerAnalytics
         date,
         hour,
         minute
-    }
-
-    [BsonIgnoreExtraElements]
-    public class AnalyticsReferrerId
-    {
-        public string uri { get; set; } = "";
-    }
-
-    [BsonIgnoreExtraElements]
-    public class AnalyticsAggregationQueryResult<T>
-    {
-        public T _id { get; set; } = default(T);
-        public long totalClicks { get; set; } = 0;
-        public long totalUniqueIPs { get; set; } = 0;
-        public long minDuration { get; set; } = long.MaxValue;
-        public long maxDuration { get; set; } = 0;
-        public double avgDuration { get; set; } = 0.0;
-        public long totalDuration { get; set; } = 0;
-        public DateTime closeTime { get; set; } = DateTime.MinValue;
-        public List<string> ips = new List<string>();
-    }
-
-    [BsonIgnoreExtraElements]
-    public class AnalyticsTimeId
-    {
-        public string time { get; set; } = "";
-        public long unix { get; set; } = 0;
-    }
-    
-    [BsonIgnoreExtraElements]
-    public class AnalyticsScreenId
-    {
-        public long screenWidth { get; set; } = 0;
-        public long screenHeight { get; set; } = 0;
-    }
-    
-    [BsonIgnoreExtraElements]
-    public class AnalyticsEndpointId
-    {
-        public string endpoint { get; set; } = "";
-        public string fullUri { get; set; } = "";
-        public string host { get; set; } = "";
-    }
-    
-    [BsonIgnoreExtraElements]
-    public class AnalyticsCountryId
-    {
-        public string countryCode { get; set; } = "";
-    }
-    
-    public class AnalyticsResponse
-    {
-        public string type { get; set; } = "success";
-        public string msg { get; set; } = "";
-        public AnalyticsResponse(string type, string msg = "")
-        {
-            this.type = type;
-            this.msg = msg;
-        }
-
-        public override string ToString()
-        {
-            return JsonSerializer.Serialize(this);
-        }
-    }
-
-    [BsonIgnoreExtraElements]
-    public class AnalyticsData
-    {
-        public ObjectId _id { get; set; } = default(ObjectId);
-        public string analyticsVersion { get; set; } = null;
-        public string fullUri { get; set; } = null;
-        public string fullEndpoint { get; set; } = null;
-        public string host { get; set; } = null;
-        public string endpoint { get; set; } = null;
-        public string uA { get; set; } = null;
-        public string remote { get; set; } = null;
-        public string referrer { get; set; } = null;
-        public long sideOpen { get; set; } = 0;// unix
-        public DateTime openTime { get; set; } = DateTime.MinValue;
-        public long sideClose { get; set; } = 0; // unix
-        public DateTime closeTime { get; set; } = DateTime.MinValue;
-        public long duration { get; set; } = 0; // seconds
-        public string token { get; set; } = "";
-        public string fileName { get; set; } = null;
-        public long screenWidth { get; set; } = 0;
-        public long screenHeight { get; set; } = 0;
-        public AnonymisedGeoLocationQueryResponse geolocation { get; set; } = new AnonymisedGeoLocationQueryResponse();
-
-        public override bool Equals(object obj)
-        {
-            AnalyticsData d = (AnalyticsData)obj;
-            return sideOpen == d.sideOpen && fullUri == d.fullUri && d.uA == uA && sideClose == d.sideClose && referrer == d.referrer && remote == d.remote;
-        }
-
-        public static AnalyticsData Load(string f)
-        {
-            AnalyticsData d = JsonSerializer.Deserialize<AnalyticsData>(File.ReadAllText(f));
-            if (d.fullUri.Contains("script") || d.uA.Contains("script") || d.referrer.Contains("script"))
-            {
-                throw new Exception("Analytics contains 'script' which is forbidden for security resons");
-            }
-            return d;
-        }
-
-        public static AnalyticsData Recieve(ServerRequest request)
-        {
-            AnalyticsData data = JsonSerializer.Deserialize<AnalyticsData>(request.bodyString);
-            data.fileName = DateTime.UtcNow.Ticks + "_" + data.sideOpen + "_" + data.sideClose + ".json";
-            switch(data.analyticsVersion)
-            {
-                case "1.0":
-                    string ip = request.context.Request.Headers["X-Forwarded-For"] == null ? request.context.Request.RemoteEndPoint.Address.ToString() : request.context.Request.Headers["X-Forwarded-For"];
-                    // data.endpoint = request.path; idiot, this will return /analytics
-                    data.geolocation = GeoLocationClient.GetAnonymisedGeoLocation(ip);
-                    data.fullUri = data.fullUri.Split('?')[0];
-                    data.fullEndpoint = new Uri(data.fullUri).AbsolutePath;
-                    data.endpoint = data.fullEndpoint.Substring(0, data.fullEndpoint.LastIndexOf("?") == -1 ? data.fullEndpoint.Length : data.fullEndpoint.LastIndexOf("?"));
-                    if (!data.endpoint.EndsWith("/")) data.endpoint += "/";
-                    data.host = new Uri(data.fullUri).Host;
-                    data.uA = request.context.Request.UserAgent;
-                    data.remote = Hasher.GetSHA256OfString(ip);
-                    data.duration = data.sideClose - data.sideOpen;
-                    if (data.duration < 0) throw new Exception("Some idiot made a manual request with negative duration.");
-                    data.openTime = TimeConverter.UnixTimeStampToDateTime(data.sideOpen);
-                    data.closeTime = TimeConverter.UnixTimeStampToDateTime(data.sideClose);
-                    if (data.closeTime > DateTime.UtcNow + new TimeSpan(0, 10, 0)) throw new Exception("Some idiot or browser thought it'd be funny to close the site 10 minutes in the future");
-                    if (data.closeTime < DateTime.UtcNow - new TimeSpan(0, 10, 0)) throw new Exception("So either the internet really took 5 minute to deliver the request or you just fucked up and got the time wrong");
-                    if (data.fullUri.Contains("script") || data.uA.Contains("script") || data.referrer.Contains("script"))
-                    {
-                        throw new Exception("Analytics contains 'script' which is forbidden for security resons");
-                    }
-                    break;
-                default:
-                    throw new Exception("Please use a supported analyticsVersion. Current latest: 1.0");
-            }
-            return data;
-        }
-
-        public static AnalyticsData ImportAnalyticsEntry(AnalyticsData data)
-        {
-            //AnalyticsData data = JsonSerializer.Deserialize<AnalyticsData>(File.ReadAllText(file));
-            data.fileName = DateTime.UtcNow.Ticks + "_" + data.sideOpen + "_" + data.sideClose + ".json";
-            switch (data.analyticsVersion)
-            {
-                case "1.0":
-                    // data.endpoint = request.path; idiot, this will return /analytics
-                    if (data.fullUri.Contains("script") || data.uA.Contains("script") || data.referrer.Contains("script"))
-                    {
-                        throw new Exception("Analytics contains 'script' which is forbidden for security resons");
-                    }
-                    data.fullUri = data.fullUri.Split('?')[0];
-                    data.fullEndpoint = new Uri(data.fullUri).AbsolutePath;
-                    data.endpoint = data.fullEndpoint.Substring(0, data.fullEndpoint.LastIndexOf("?") == -1 ? data.fullEndpoint.Length : data.fullEndpoint.LastIndexOf("?"));
-                    if (!data.endpoint.EndsWith("/")) data.endpoint += "/";
-                    data.host = new Uri(data.fullUri).Host;
-                    data.duration = data.sideClose - data.sideOpen;
-                    if (data.duration < 0) throw new Exception("Some idiot made a manual request with negative duration.");
-                    data.openTime = TimeConverter.UnixTimeStampToDateTime(data.sideOpen);
-                    data.closeTime = TimeConverter.UnixTimeStampToDateTime(data.sideClose);
-                    if (data.closeTime > DateTime.UtcNow) throw new Exception("Some idiot or browser thought it'd be funny to close the site in the future");
-                    break;
-                default:
-                    throw new Exception("Please use a supported analyticsVersion. Current latest: 1.0");
-            }
-
-            return data;
-        }
-
-        public override string ToString()
-        {
-            return JsonSerializer.Serialize(this);
-        }
     }
 }
