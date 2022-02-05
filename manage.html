@@ -152,8 +152,8 @@
             function Shutdown() {
                 POST("/shutdown", "")
             }
-            function Renew(url) {
-                POST("/renewtokens", url)
+            function Renew(url, token) {
+                POST("/renewtokens", url + '|' + token)
             }
             function MasterWebhook() {
                 POST("/masterwebhook", document.getElementById("webhook").value)
@@ -203,17 +203,49 @@
             fetch("/masterwebhook").then(res => res.text().then(t => {
                 document.getElementById("webhook").value = t
             }))
+            function GetUTCDate(date) {
+                return new Date(
+                    date.getUTCFullYear(),
+                    date.getUTCMonth(),
+                    date.getUTCDate(),
+                    date.getUTCHours(),
+                    date.getUTCMinutes(),
+                    date.getUTCSeconds(),
+                    date.getUTCMilliseconds(),
+                )
+            }
+            function AddToken(url, expiration) {
+                POST("/addtoken", url + "|" + new Date(expiration).toISOString())
+            }
+            function DeleteToken(url, token) {
+                POST("/deletetoken", url + "|" + token)
+            }
             fetch("/websites").then(res => {
                 res.json().then(w => {
                     var i = 0
                     w.forEach(e => {
+                        var tokens = ""
+                        e.privateTokens.forEach(token => {
+                            var expires = new Date(token.expires)
+                            tokens +=  `<div style="display: flex; margin-top: 20px; flex-direction: column; background-color: #333333; padding: 10px;">
+                                            <div><code>${token.value}</code></div>
+                                            <div style="margin-top: 8px;">Expires on ${expires.toUTCString()}</div>
+                                            <div class="customButton" onclick="Renew('${e.url}', '${token.value}')">Renew this token</div>
+                                            <div class="customButton" onclick="DeleteToken('${e.url}', '${token.value}')">Remove this token</div>
+                                        </div>`
+                        })
                         websites.innerHTML +=  `<div style="display: flex; flex-direction: column; border: #EEEEEE 1px solid; width: 100%; padding: 15px;">
                                                 <a style="font-weight: bold;" href="${e.url}">${e.url}</a>
-                                                <div>public: ${e.publicToken}</div>
-                                                <div>private: ${e.privateToken}</div>
-                                                <input placeholder="webhookUrl" value="${e.discordWebhookUrl}" type="password" id="${i}">
+                                                <div>public: <code>${e.publicToken}</code></div>
+                                                <div class="customButton" onclick="Renew('${e.url}', '${e.publicToken}')">Renew public token</div>
+                                                <div style="display: flex; flex-direction: column">private: ${tokens}</div>
+                                                <input style="margin-top: 20px;" placeholder="webhookUrl" value="${e.discordWebhookUrl}" type="password" id="${i}">
                                                 <div onclick="Webhook('${i}', '${e.url}')" class="customButton">Set Discord webhook url</div>
-                                                <div class="customButton" onclick="Renew('${e.url}')">Renew tokens</div>
+                                                <div class="customButton" onclick="Renew('${e.url}', '')">Renew all tokens</div>
+                                                <div style="display: flex; margin-top: 20px; flex-direction: column; background-color: #333333; padding: 10px;">
+                                                    <input type="datetime-local" id="${e.url}">
+                                                    <div class="customButton" onclick="AddToken('${e.url}', document.getElementById('${e.url}').value)">Add Token</div>
+                                                </div>
                                                 <div class="customButton" onclick="Delete('${e.url}', '${e.privateToken}', '${e.publicToken}')" style="background-color: #DA3633">Delete Website (not undoable)</div>
                                             </div>`
                         i++

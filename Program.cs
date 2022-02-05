@@ -279,56 +279,6 @@ namespace ComputerAnalytics
 
                 return true;
             }));
-            server.AddRoute("GET", "/analytics/hosts", new Func<ServerRequest, bool>(request =>
-            {
-                if (IsNotLoggedIn(request)) return true;
-                try
-                {
-                    request.SendStringReplace(JsonSerializer.Serialize(collection.GetAllHostsWithAssociatedData(request)), "application/json", 200, replace);
-                }
-                catch (Exception e)
-                {
-                    Logger.Log("Error while crunching data:\n" + e.ToString(), LoggingType.Warning);
-                    request.SendString("Error: " + e.Message, "text/plain", 500);
-                }
-
-                return true;
-            }));
-            server.AddRoute("POST", "/import", new Func<ServerRequest, bool>(request =>
-            {
-                if (IsNotLoggedIn(request)) return true;
-                try
-                {
-                    List<AnalyticsData> datas = JsonSerializer.Deserialize<List<AnalyticsData>>(request.bodyString);
-                    int i = 0;
-                    int rejected = 0;
-                    string publicToken = collection.GetPublicTokenFromPrivateToken(GetToken(request));
-                    foreach(AnalyticsData analyticsData in datas)
-                    {
-                        if (analyticsData.token == "") analyticsData.token = publicToken;
-                        try
-                        {
-                            if (!collection.Contains(analyticsData))
-                            {
-
-                                collection.AddAnalyticsToWebsite(AnalyticsData.ImportAnalyticsEntry(analyticsData));
-                                i++;
-
-                            }
-                        } catch (Exception e)
-                        {
-                            Logger.Log("Expection while importing Analytics data:\n" + e.Message, LoggingType.Warning);
-                            rejected++;
-                        }
-                        
-                    }
-                    request.SendString("Imported " + i + " AnalyticsDatas, rejected " + rejected + " AnalyticsDatas");
-                } catch (Exception e)
-                {
-                    request.SendString("Error: " + e.ToString(), "text/plain", 500);
-                }
-                return true;
-            }));
             server.AddRoute("GET", "/websites", new Func<ServerRequest, bool>(request =>
             {
                 if(GetToken(request) != collection.config.masterToken)
@@ -366,7 +316,27 @@ namespace ComputerAnalytics
                     request.Send403();
                     return true;
                 }
-                request.SendString(collection.RenewTokens(request.bodyString), "application/json");
+                request.SendString(collection.RenewTokens(request.bodyString.Split('|')[0], request.bodyString.Split('|')[1]), "application/json"); // url|token
+                return true;
+            }));
+            server.AddRoute("POST", "/addtoken", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(collection.AddToken(request.bodyString.Split('|')[0], request.bodyString.Split('|')[1]), "application/json"); // url|expires
+                return true;
+            }));
+            server.AddRoute("POST", "/deletetoken", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                request.SendString(collection.RemoveToken(request.bodyString.Split('|')[0], request.bodyString.Split('|')[1]), "application/json"); // url|token
                 return true;
             }));
             server.AddRoute("POST", "/renewmastertoken", new Func<ServerRequest, bool>(request =>
@@ -734,6 +704,7 @@ namespace ComputerAnalytics
             FileManager.CreateDirectoryIfNotExisting(analyticsDir);
             if(!File.Exists(analyticsDir + "config.json")) SaveConfig();
             config = JsonSerializer.Deserialize<Config>(File.ReadAllText(analyticsDir + "config.json"));
+            config.Fix();
             if (config.publicAddress == "") SetPublicAddress("http://localhost");
             if (config.useMongoDB)
             {
@@ -773,7 +744,7 @@ namespace ComputerAnalytics
         {
             foreach (Website w in config.Websites)
             {
-                if (w.privateToken == privateToken) return w.publicToken;
+                if (w.HasPrivateToken(privateToken)) return w.publicToken;
             }
             return "";
         }
@@ -787,6 +758,21 @@ namespace ComputerAnalytics
             }
             config.usedTokens.Add(token);
             return token;
+        }
+
+        public string AddToken(string url, string expires)
+        {
+            DateTime expiration = DateTime.Parse(expires);
+            for (int i = 0; i < config.Websites.Count; i++)
+            {
+                if (config.Websites[i].url == url)
+                {
+                    config.Websites[i].privateTokens.Add(new Token(CreateRandomToken(), expiration));
+                    SaveConfig();
+                    return "Added token which expires on " + expiration.ToString() + " for " + url;
+                }
+            }
+            return "Website not registered";
         }
 
         public int GetDatabaseIndexWithPublicToken(string publicToken, string origin)
@@ -817,7 +803,7 @@ namespace ComputerAnalytics
         {
             for (int i = 0; i < config.Websites.Count; i++)
             {
-                if (config.Websites[i].privateToken == privateToken)
+                if (config.Websites[i].HasPrivateToken(privateToken))
                 {
                     return i;
                 }
@@ -887,7 +873,7 @@ namespace ComputerAnalytics
             Website website = new Website();
             website.url = host;
             website.publicToken = CreateRandomToken();
-            website.privateToken = CreateRandomToken();
+            website.privateTokens.Add(new Token(CreateRandomToken(), DateTime.MaxValue));
             website.folder = StringFormatter.FileNameSafe(host).Replace("https", "").Replace("http", "") + Path.DirectorySeparatorChar;
             if(config.useMongoDB)
             {
@@ -924,16 +910,53 @@ namespace ComputerAnalytics
             return "Website not registered";
         }
 
-        public string RenewTokens(string url)
+        public string RenewTokens(string url, string token)
         {
             for (int i = 0; i < config.Websites.Count; i++)
             {
                 if (config.Websites[i].url == url)
                 {
-                    config.Websites[i].publicToken = CreateRandomToken();
-                    config.Websites[i].privateToken = CreateRandomToken();
+                    if(token == config.Websites[i].publicToken) config.Websites[i].publicToken = CreateRandomToken();
+                    if (token == "")
+                    {
+                        config.Websites[i].publicToken = CreateRandomToken();
+                        for (int ii = 0; ii < config.Websites[i].privateTokens.Count; ii++)
+                        {
+                            config.Websites[i].privateTokens[ii].value = CreateRandomToken();
+                        }
+                    } else
+                    {
+                        for(int ii = 0; ii < config.Websites[i].privateTokens.Count; ii++)
+                        {
+                            if (config.Websites[i].privateTokens[ii].value == token) config.Websites[i].privateTokens[ii].value = CreateRandomToken();
+                        }
+                    }
+                    config.Fix();
                     SaveConfig();
-                    return "Renewed tokens for " + url;
+                    return "Renewed tokens (" + token + ") for " + url;
+                }
+            }
+            return "Website not registered";
+        }
+
+        public string RemoveToken(string url, string token)
+        {
+            for (int i = 0; i < config.Websites.Count; i++)
+            {
+                if (config.Websites[i].url == url)
+                {
+                    
+                    for (int ii = 0; ii < config.Websites[i].privateTokens.Count; ii++)
+                    {
+                        if (config.Websites[i].privateTokens[ii].value == token)
+                        {
+                            config.Websites[i].privateTokens.RemoveAt(ii);
+                            break;
+                        }
+                    }
+                    config.Fix();
+                    SaveConfig();
+                    return "Deleted token " + token + " from " + url;
                 }
             }
             return "Website not registered";
@@ -962,7 +985,7 @@ namespace ComputerAnalytics
         {
             foreach (Website website in config.Websites)
             {
-                if (website.privateToken == privateToken) return true;
+                if (website.HasPrivateToken(privateToken)) return true;
             }
             return false;
         }
@@ -975,62 +998,52 @@ namespace ComputerAnalytics
             }
         }
 
-        public List<AnalyticsEndpoint> GetAllEndpointsWithAssociatedData(ServerRequest request)
+        public List<AnalyticsAggregationQueryResult<AnalyticsEndpointId>> GetAllEndpointsWithAssociatedData(ServerRequest request)
         {
             string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
             NameValueCollection queryString = request.queryString;
             int i = GetDatabaseIndexWithPrivateToken(privateToken);
-            if(i == -1) return new List<AnalyticsEndpoint>();
+            if(i == -1) return new List<AnalyticsAggregationQueryResult<AnalyticsEndpointId>>();
             Logger.Log("Crunching Endpoints of database for " + config.Websites[i].url + " just because some idiot needs them");
             return databases[i].GetAllEndpointsWithAssociatedData(null, queryString);
         }
 
-        public List<AnalyticsCountry> GetAllCountriesWithAssociatedData(ServerRequest request)
+        public List<AnalyticsAggregationQueryResult<AnalyticsCountryId>> GetAllCountriesWithAssociatedData(ServerRequest request)
         {
             string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
             NameValueCollection queryString = request.queryString;
             int i = GetDatabaseIndexWithPrivateToken(privateToken);
-            if (i == -1) return new List<AnalyticsCountry>();
+            if (i == -1) return new List<AnalyticsAggregationQueryResult<AnalyticsCountryId>>();
             Logger.Log("Crunching Countries of database for " + config.Websites[i].url + " just because there are so many countries");
             return databases[i].GetAllCountriesWithAssociatedData(null, queryString);
         }
 
-        public List<AnalyticsHost> GetAllHostsWithAssociatedData(ServerRequest request)
+        public List<AnalyticsAggregationQueryResult<AnalyticsTimeId>> GetAllEndpointsSortedByTimeWithAssociatedData(ServerRequest request)
         {
             string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
             NameValueCollection queryString = request.queryString;
             int i = GetDatabaseIndexWithPrivateToken(privateToken);
-            if (i == -1) return new List<AnalyticsHost>();
-            Logger.Log("Crunching Hosts of database for " + config.Websites[i].url + " just because they were requested by some ugly guy");
-            return databases[i].GetAllHostsWithAssociatedData(null, queryString);
-        }
-
-        public List<AnalyticsTime> GetAllEndpointsSortedByTimeWithAssociatedData(ServerRequest request)
-        {
-            string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
-            NameValueCollection queryString = request.queryString;
-            int i = GetDatabaseIndexWithPrivateToken(privateToken);
-            if (i == -1) return new List<AnalyticsTime>();
+            if (i == -1) return new List<AnalyticsAggregationQueryResult<AnalyticsTimeId>>();
             Logger.Log("Crunching Endpoints Sorted by time of database for " + config.Websites[i].url + " just because of DN");
             return databases[i].GetAllEndpointsSortedByTimeWithAssociatedData(null, queryString);
         }
 
-        public List<AnalyticsScreen> GetAllScreensWithAssociatedData(ServerRequest request)
+        public List<AnalyticsAggregationQueryResult<AnalyticsScreenId>> GetAllScreensWithAssociatedData(ServerRequest request)
         {
             string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
             NameValueCollection queryString = request.queryString;
             int i = GetDatabaseIndexWithPrivateToken(privateToken);
-            if (i == -1) return new List<AnalyticsScreen>();
+            if (i == -1) return new List<AnalyticsAggregationQueryResult<AnalyticsScreenId>>();
             Logger.Log("Crunching screens of database for " + config.Websites[i].url + " just because of all those interesting sizes");
             return databases[i].GetAllScreensWithAssociatedData(null, queryString);
         }
 
-        public List<AnalyticsReferrer> GetAllReferrersWithAssociatedData(ServerRequest request)
+        public List<AnalyticsAggregationQueryResult<AnalyticsReferrerId>> GetAllReferrersWithAssociatedData(ServerRequest request)
         {
             string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
             NameValueCollection queryString = request.queryString;
             int i = GetDatabaseIndexWithPrivateToken(privateToken);
-            if (i == -1) return new List<AnalyticsReferrer>();
+            if (i == -1) return new List<AnalyticsAggregationQueryResult<AnalyticsReferrerId>>();
             Logger.Log("Crunching Referrers of database for " + config.Websites[i].url + " just because of IsPinkCute == true");
             return databases[i].GetAllReferrersWithAssociatedData(null, queryString);
         }
@@ -1077,19 +1090,12 @@ namespace ComputerAnalytics
             long  lastTimeUnix = TimeConverter.DateTimeToUnixTimestamp(lastTime);
             if(parentCollection.config.useMongoDB)
             {
-                BsonDocument filter = new BsonDocument("sideClose", new BsonDocument("$gte", lastTimeUnix));
-                //if (host != null && d.host != host) return true;
-                if (endpoint != null) filter.Add(new BsonElement("endpoint", endpoint));
-                if (referrer != null) filter.Add(new BsonElement("referrer", referrer));
-                if (screenwidth != null) filter.Add(new BsonElement("screenWidth", screenwidth));
-                if (screenheight != null) filter.Add(new BsonElement("screenHeight", screenheight));
-                if (countryCode != null) filter.Add(new BsonElement("geolocation.countryCode", countryCode));
-                IEnumerable<BsonDocument> docs = documents.Find(filter).ToEnumerable();
+
+                IEnumerable<BsonDocument> docs = documents.Find(GetFilter()).ToEnumerable();
                 foreach (BsonDocument document in docs)
                 {
                     yield return BsonSerializer.Deserialize<AnalyticsData>(document);
                 }
-                filter = null;
                 docs = null;
             } else
             {
@@ -1213,107 +1219,167 @@ namespace ComputerAnalytics
             */
         }
 
-        public List<AnalyticsEndpoint> GetAllEndpointsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
+        public BsonDocument GetFilter()
+        {
+            DateTime lastTime = DateTime.Now - new TimeSpan(days, hours, minutes, seconds);
+            Logger.Log("Gettings Filter from " + lastTime.ToString() + " to " + DateTime.Now);
+            long lastTimeUnix = TimeConverter.DateTimeToUnixTimestamp(lastTime);
+            BsonDocument filter = new BsonDocument("sideClose", new BsonDocument("$gte", lastTimeUnix));
+            //if (host != null && d.host != host) return true;
+            if (endpoint != null) filter.Add(new BsonElement("endpoint", endpoint));
+            if (referrer != null) filter.Add(new BsonElement("referrer", referrer));
+            if (screenwidth != null) filter.Add(new BsonElement("screenWidth", screenwidth));
+            if (screenheight != null) filter.Add(new BsonElement("screenHeight", screenheight));
+            if (countryCode != null) filter.Add(new BsonElement("geolocation.countryCode", countryCode));
+            return new BsonDocument("$match", filter);
+        }
+
+        public BsonDocument[] GetGroupQuery(BsonDocument id, BsonDocument returnId)
+        {
+            return new BsonDocument[]
+                {
+                    GetFilter(),
+                    new BsonDocument("$group",
+                        new BsonDocument
+                            {
+                                { "_id",
+                                    id },
+                                { "ipcount",
+                        new BsonDocument("$sum", 1) },
+                                { "minDuration",
+                        new BsonDocument("$min", "$duration") },
+                                { "maxDuration",
+                        new BsonDocument("$max", "$duration") },
+                                { "avgDuration",
+                        new BsonDocument("$avg", "$duration") },
+                                { "totalDuration",
+                        new BsonDocument("$sum", "$duration") },
+                                {"closeTime", new BsonDocument("$first", "$closeTime") }
+                        }),
+                    new BsonDocument("$group",
+                        new BsonDocument
+                            {
+                                { "_id",
+                                    returnId },
+                                { "totalUniqueIPs",
+                        new BsonDocument("$sum", 1) },
+                                { "totalClicks",
+                        new BsonDocument("$sum", "$ipcount") },
+                                { "minDuration",
+                        new BsonDocument("$min", "$minDuration") },
+                                { "maxDuration",
+                        new BsonDocument("$max", "$maxDuration") },
+                                { "avgDuration",
+                        new BsonDocument("$avg", "$avgDuration") },
+                                { "totalDuration",
+                        new BsonDocument("$sum", "$totalDuration") },
+                                {"closeTime", new BsonDocument("$first", "$closeTime") }
+                    }),
+                    new BsonDocument("$sort", new BsonDocument("totalClicks", -1))
+                };
+        }
+
+        public List<AnalyticsAggregationQueryResult<AnalyticsEndpointId>> GetAllEndpointsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             PreCalculate(queryString);
-            Dictionary<string, AnalyticsEndpoint> endpoints = new Dictionary<string, AnalyticsEndpoint>();
-            foreach(AnalyticsData data in usedData == null ? GetIterator() : usedData)
+            if(parentCollection.config.useMongoDB)
+            {
+                Logger.Log(GetGroupQuery(new BsonDocument
+                                {
+                                    { "remote", "$remote" },
+                                    { "endpoint", "$endpoint" },
+                                    { "host", "$host" },
+                                    { "fullUri", "$fullUri" }
+                                },
+                                new BsonDocument
+                                {
+                                    { "endpoint", "$_id.endpoint" },
+                                    { "host", "$_id.host" },
+                                    { "fullUri", "$_id.fullUri" }
+                                }).ToJson());
+                return documents.Aggregate<AnalyticsAggregationQueryResult<AnalyticsEndpointId>>(GetGroupQuery(new BsonDocument
+                                {
+                                    { "remote", "$remote" },
+                                    { "endpoint", "$endpoint" },
+                                    { "host", "$host" },
+                                    { "fullUri", "$fullUri" }
+                                },
+                                new BsonDocument
+                                {
+                                    { "endpoint", "$_id.endpoint" },
+                                    { "host", "$_id.host" },
+                                    { "fullUri", "$_id.fullUri" }
+                                })).ToList();
+            }
+            Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsEndpointId>> endpoints = new Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsEndpointId>>();
+            foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
                 if (!endpoints.ContainsKey(data.endpoint))
                 {
-                    endpoints.Add(data.endpoint, new AnalyticsEndpoint());
-                    endpoints[data.endpoint].endpoint = data.endpoint;
-                    endpoints[data.endpoint].host = data.host;
-                    endpoints[data.endpoint].fullUri = data.fullUri.Split('?')[0];
+                    endpoints.Add(data.endpoint, new AnalyticsAggregationQueryResult<AnalyticsEndpointId>());
+                    endpoints[data.endpoint]._id.endpoint = data.endpoint;
+                    endpoints[data.endpoint]._id.host = data.host;
+                    endpoints[data.endpoint]._id.fullUri = data.fullUri.Split('?')[0];
                 }
-                endpoints[data.endpoint].clicks++;
+                endpoints[data.endpoint].totalClicks++;
                 endpoints[data.endpoint].totalDuration += data.duration;
                 if (endpoints[data.endpoint].maxDuration < data.duration) endpoints[data.endpoint].maxDuration = data.duration;
                 if (endpoints[data.endpoint].minDuration > data.duration) endpoints[data.endpoint].minDuration = data.duration;
-                endpoints[data.endpoint].data.Add(data);
                 if (!endpoints[data.endpoint].ips.Contains(data.remote))
                 {
-                    endpoints[data.endpoint].uniqueIPs++;
+                    endpoints[data.endpoint].totalUniqueIPs++;
                     endpoints[data.endpoint].ips.Add(data.remote);
                 }
             }
-            List<AnalyticsEndpoint> endpointsL = endpoints.Values.OrderBy(x => x.clicks).ToList();
+            List<AnalyticsAggregationQueryResult<AnalyticsEndpointId>> endpointsL = endpoints.Values.OrderBy(x => x.totalClicks).ToList();
             endpoints.Clear();
-            endpointsL.ForEach(new Action<AnalyticsEndpoint>(e =>
+            endpointsL.ForEach(new Action<AnalyticsAggregationQueryResult<AnalyticsEndpointId>>(e =>
             {
-                e.avgDuration = e.totalDuration / (double)e.clicks;
-                if(deep)
-                {
-                    e.referrers = GetAllReferrersWithAssociatedData(e.data, queryString);
-                }
+                e.avgDuration = e.totalDuration / (double)e.totalClicks;
             }));
             return endpointsL;
         }
 
-        public List<AnalyticsCountry> GetAllCountriesWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsAggregationQueryResult<AnalyticsCountryId>> GetAllCountriesWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             PreCalculate(queryString);
-            Dictionary<string, AnalyticsCountry> countries = new Dictionary<string, AnalyticsCountry>();
+            if(parentCollection.config.useMongoDB)
+            {
+                return documents.Aggregate<AnalyticsAggregationQueryResult<AnalyticsCountryId>>(GetGroupQuery(new BsonDocument
+                                {
+                                    { "remote", "$remote" },
+                                    { "countryCode", "$geolocation.countryCode" }
+                                },
+                                new BsonDocument
+                                {
+                                    { "countryCode", "$_id.countryCode" }
+                                })).ToList();
+            }
+            Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsCountryId>> countries = new Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsCountryId>>();
             foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
                 if (!countries.ContainsKey(data.geolocation.countryCode))
                 {
-                    countries.Add(data.geolocation.countryCode, new AnalyticsCountry());
-                    countries[data.geolocation.countryCode].countryCode = data.geolocation.countryCode;
+                    countries.Add(data.geolocation.countryCode, new AnalyticsAggregationQueryResult<AnalyticsCountryId>());
+                    countries[data.geolocation.countryCode]._id.countryCode = data.geolocation.countryCode;
                 }
-                countries[data.geolocation.countryCode].clicks++;
+                countries[data.geolocation.countryCode].totalClicks++;
                 countries[data.geolocation.countryCode].totalDuration += data.duration;
                 if (countries[data.geolocation.countryCode].maxDuration < data.duration) countries[data.geolocation.countryCode].maxDuration = data.duration;
                 if (countries[data.geolocation.countryCode].minDuration > data.duration) countries[data.geolocation.countryCode].minDuration = data.duration;
-                countries[data.geolocation.countryCode].data.Add(data);
                 if (!countries[data.geolocation.countryCode].ips.Contains(data.remote))
                 {
-                    countries[data.geolocation.countryCode].uniqueIPs++;
+                    countries[data.geolocation.countryCode].totalUniqueIPs++;
                     countries[data.geolocation.countryCode].ips.Add(data.remote);
                 }
             }
-            List<AnalyticsCountry> countriesL = countries.Values.OrderBy(x => x.clicks).ToList();
+            List<AnalyticsAggregationQueryResult<AnalyticsCountryId>> countriesL = countries.Values.OrderBy(x => x.totalClicks).ToList();
             countries.Clear();
-            countriesL.ForEach(new Action<AnalyticsCountry>(e =>
+            countriesL.ForEach(new Action<AnalyticsAggregationQueryResult<AnalyticsCountryId>>(e =>
             {
-                e.avgDuration = e.totalDuration / (double)e.clicks;
-                if (deep)
-                {
-                    e.referrers = GetAllReferrersWithAssociatedData(e.data, queryString);
-                }
+                e.avgDuration = e.totalDuration / (double)e.totalClicks;
             }));
             return countriesL;
-        }
-
-        public List<AnalyticsHost> GetAllHostsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
-        {
-            PreCalculate(queryString);
-            Dictionary<string, AnalyticsHost> hosts = new Dictionary<string, AnalyticsHost>();
-            foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
-            {
-                if (!hosts.ContainsKey(data.host))
-                {
-                    hosts.Add(data.host, new AnalyticsHost());
-                    hosts[data.host].host = data.host;
-                }
-                hosts[data.host].totalClicks++;
-                hosts[data.host].data.Add(data);
-                hosts[data.host].totalDuration += data.duration;
-                if (hosts[data.host].maxDuration < data.duration) hosts[data.host].maxDuration = data.duration;
-                if (hosts[data.host].minDuration > data.duration) hosts[data.host].minDuration = data.duration;
-                if (!hosts[data.host].ips.Contains(data.remote))
-                {
-                    hosts[data.host].totalUniqueIPs++;
-                    hosts[data.host].ips.Add(data.remote);
-                }
-            }
-            List<AnalyticsHost> hostsL = hosts.Values.OrderBy(x => x.totalClicks).ToList();
-            hosts.Clear();
-            hostsL.ForEach(new Action<AnalyticsHost>(h => {
-                h.endpoints = GetAllEndpointsWithAssociatedData(h.data, queryString);
-                h.avgDuration = h.totalDuration / (double)h.totalClicks;
-            }));
-            return hostsL;
         }
 
         public string GetTimeString(AnalyticsData data)
@@ -1324,23 +1390,57 @@ namespace ComputerAnalytics
             return "";
         }
 
-        public List<AnalyticsTime> GetAllEndpointsSortedByTimeWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsAggregationQueryResult<AnalyticsTimeId>> GetAllEndpointsSortedByTimeWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             PreCalculate(queryString);
-            Dictionary<string, AnalyticsTime> times = new Dictionary<string, AnalyticsTime>();
+            if(parentCollection.config.useMongoDB)
+            {
+                BsonDocument time = new BsonDocument();
+                if(timeunit == TimeUnit.hour) time = new BsonDocument("$toString", new BsonDocument("$hour", new BsonDocument("$toDate", "$closeTime")));
+                else if(timeunit == TimeUnit.minute) time = new BsonDocument("$toString", new BsonDocument("$minute", new BsonDocument("$toDate", "$closeTime")));
+                else if (timeunit == TimeUnit.date) time = new BsonDocument("$concat", new BsonArray
+                {
+                    new BsonDocument("$toString",
+                    new BsonDocument("$dayOfMonth",
+                    new BsonDocument("$toDate", "$closeTime"))),
+                    ".",
+                    new BsonDocument("$toString",
+                    new BsonDocument("$month",
+                    new BsonDocument("$toDate", "$closeTime"))),
+                    ".",
+                    new BsonDocument("$toString",
+                    new BsonDocument("$year",
+                    new BsonDocument("$toDate", "$closeTime")))
+                });
+                List<AnalyticsAggregationQueryResult<AnalyticsTimeId>> timess = documents.Aggregate<AnalyticsAggregationQueryResult<AnalyticsTimeId>>(GetGroupQuery(new BsonDocument
+                                {
+                                    { "remote", "$remote" },
+                                    { "time", time }
+                                },
+                                new BsonDocument
+                                {
+                                    { "time", "$_id.time" },
+                                    { "unix", "$_id.unix" }
+                                })).ToList();
+                timess.ForEach(e =>
+                {
+                    if (timeunit == TimeUnit.date) e._id.unix = ((DateTimeOffset)e.closeTime.Date).ToUnixTimeSeconds();
+                    else if (timeunit == TimeUnit.hour) e._id.unix = e.closeTime.Hour;
+                    else if (timeunit == TimeUnit.minute) e._id.unix = e.closeTime.Minute;
+                });
+                return timess.OrderBy(x => x._id.unix).ToList();
+            }
+            Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsTimeId>> times = new Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsTimeId>>();
             foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
                 string date = GetTimeString(data);
                 if(!times.ContainsKey(date))
                 {
-                    times.Add(date, new AnalyticsTime());
-                    times[date].time = date;
-                    if (timeunit == TimeUnit.date) times[date].unix = ((DateTimeOffset)data.openTime.Date).ToUnixTimeSeconds();
-                    else if (timeunit == TimeUnit.hour) times[date].unix = data.openTime.Hour;
-                    else if (timeunit == TimeUnit.minute) times[date].unix = data.openTime.Minute;
+                    times.Add(date, new AnalyticsAggregationQueryResult<AnalyticsTimeId>());
+                    times[date]._id.time = date;
+                    
                 }
                 times[date].totalClicks++;
-                times[date].data.Add(data);
                 times[date].totalDuration += data.duration;
                 if (times[date].maxDuration < data.duration) times[date].maxDuration = data.duration;
                 if (times[date].minDuration > data.duration) times[date].minDuration = data.duration;
@@ -1350,80 +1450,106 @@ namespace ComputerAnalytics
                     times[date].ips.Add(data.remote);
                 }
             }
-            List<AnalyticsTime> datesL = times.Values.OrderBy(x => x.unix).ToList();
+            List<AnalyticsAggregationQueryResult<AnalyticsTimeId>> datesL = times.Values.OrderBy(x => x._id.unix).ToList();
             times.Clear();
-            datesL.ForEach(new Action<AnalyticsTime>(d => {
+            datesL.ForEach(new Action<AnalyticsAggregationQueryResult<AnalyticsTimeId>>(d => {
                 d.avgDuration = d.totalDuration / (double)d.totalClicks;
             }));
             return datesL;
         }
 
-        public List<AnalyticsScreen> GetAllScreensWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsAggregationQueryResult<AnalyticsScreenId>> GetAllScreensWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             PreCalculate(queryString);
-            Dictionary<string, AnalyticsScreen> screens = new Dictionary<string, AnalyticsScreen>();
+            if(parentCollection.config.useMongoDB)
+            {
+                return documents.Aggregate<AnalyticsAggregationQueryResult<AnalyticsScreenId>>(GetGroupQuery(new BsonDocument
+                                {
+                                    { "remote", "$remote" },
+                                    { "screenWidth", "$screenWidth" },
+                                    { "screenHeight", "$screenHeight" }
+                                },
+                                new BsonDocument
+                                {
+                                    { "screenWidth", "$_id.screenWidth" },
+                                    { "screenHeight", "$_id.screenHeight" }
+                                })).ToList();
+            }
+            Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsScreenId>> screens = new Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsScreenId>>();
             foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
                 string screen = data.screenWidth + "," + data.screenHeight;
                 if (!screens.ContainsKey(screen))
                 {
-                    screens.Add(screen, new AnalyticsScreen());
-                    screens[screen].screenWidth = data.screenWidth;
-                    screens[screen].screenHeight = data.screenHeight;
+                    screens.Add(screen, new AnalyticsAggregationQueryResult<AnalyticsScreenId>());
+                    screens[screen]._id.screenWidth = data.screenWidth;
+                    screens[screen]._id.screenHeight = data.screenHeight;
                 }
-                screens[screen].clicks++;
-                screens[screen].data.Add(data);
+                screens[screen].totalClicks++;
                 screens[screen].totalDuration += data.duration;
                 if (screens[screen].maxDuration < data.duration) screens[screen].maxDuration = data.duration;
                 if (screens[screen].minDuration > data.duration) screens[screen].minDuration = data.duration;
                 if (!screens[screen].ips.Contains(data.remote))
                 {
-                    screens[screen].uniqueIPs++;
+                    screens[screen].totalUniqueIPs++;
                     screens[screen].ips.Add(data.remote);
                 }
             }
             screens = Sorter.Sort(screens);
-            List<AnalyticsScreen> screensL = screens.Values.ToList();
+            List<AnalyticsAggregationQueryResult<AnalyticsScreenId>> screensL = screens.Values.ToList();
             screens.Clear();
             // Remove screens with fewer than 2 users
             for(int i = 0; i < screensL.Count; i++)
             {
-                if (screensL[i].uniqueIPs <= 1)
+                if (screensL[i].totalUniqueIPs <= 1)
                 {
                     screensL.RemoveAt(i);
                     i--;
                     continue;
                 }
-                screensL[i].avgDuration = screensL[i].totalDuration / (double)screensL[i].clicks;
+                screensL[i].avgDuration = screensL[i].totalDuration / (double)screensL[i].totalClicks;
             }
-            screensL = screensL.OrderBy(s => s.clicks).ToList();
+            screensL = screensL.OrderBy(s => s.totalClicks).ToList();
             screensL.Reverse();
             return screensL;
         }
 
-        public List<AnalyticsReferrer> GetAllReferrersWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
+        public List<AnalyticsAggregationQueryResult<AnalyticsReferrerId>> GetAllReferrersWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             PreCalculate(queryString);
-            Dictionary<string, AnalyticsReferrer> referrers = new Dictionary<string, AnalyticsReferrer>();
+            if(parentCollection.config.useMongoDB)
+            {
+                return documents.Aggregate<AnalyticsAggregationQueryResult<AnalyticsReferrerId>>(GetGroupQuery(new BsonDocument
+                                {
+                                    { "remote", "$remote" },
+                                    { "uri", "$referrer" }
+                                },
+                                new BsonDocument
+                                {
+                                    { "uri", "$_id.uri" }
+                                })).ToList();
+            }
+            Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsReferrerId>> referrers = new Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsReferrerId>>();
             foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
             {
                 if (!referrers.ContainsKey(data.referrer))
                 {
-                    referrers.Add(data.referrer, new AnalyticsReferrer(data.referrer));
+                    referrers.Add(data.referrer, new AnalyticsAggregationQueryResult<AnalyticsReferrerId>());
+                    referrers[data.referrer]._id.uri = data.referrer;
                 }
-                referrers[data.referrer].referred++;
+                referrers[data.referrer].totalClicks++;
                 referrers[data.referrer].totalDuration += data.duration;
                 if (referrers[data.referrer].maxDuration < data.duration) referrers[data.referrer].maxDuration = data.duration;
                 if (referrers[data.referrer].minDuration > data.duration) referrers[data.referrer].minDuration = data.duration;
                 if (!referrers[data.referrer].ips.Contains(data.remote))
                 {
-                    referrers[data.referrer].uniqueIPs++;
+                    referrers[data.referrer].totalUniqueIPs++;
                     referrers[data.referrer].ips.Add(data.remote);
                 }
             }
-            List<AnalyticsReferrer> referrersL = referrers.Values.OrderBy(x => x.referred).ToList();
+            List<AnalyticsAggregationQueryResult<AnalyticsReferrerId>> referrersL = referrers.Values.OrderBy(x => x.totalClicks).ToList();
             referrers.Clear();
-            referrersL.ForEach(new Action<AnalyticsReferrer>(e => e.avgDuration = e.totalDuration / (double)e.referred));
+            referrersL.ForEach(new Action<AnalyticsAggregationQueryResult<AnalyticsReferrerId>>(e => e.avgDuration = e.totalDuration / (double)e.totalClicks));
             return referrersL;
         }
 
@@ -1502,106 +1628,54 @@ namespace ComputerAnalytics
         minute
     }
 
-    public class AnalyticsHost
-    {
-        public string host { get; set; } = "";
-        public long totalClicks { get; set; } = 0;
-        public long totalUniqueIPs { get; set; } = 0;
-        public long minDuration { get; set; } = long.MaxValue;
-        public long maxDuration { get; set; } = 0;
-        public double avgDuration { get; set; } = 0.0;
-        public long totalDuration { get; set; } = 0;
-
-        //public List<AnalyticsQueryString> queryStrings { get; set; } = new List<AnalyticsQueryString>();
-        public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
-        //public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<AnalyticsData> data = new List<AnalyticsData>();
-        public List<string> ips = new List<string>();
-    }
-
-    public class AnalyticsReferrer
+    [BsonIgnoreExtraElements]
+    public class AnalyticsReferrerId
     {
         public string uri { get; set; } = "";
-        public long referred { get; set; } = 0;
-        public long uniqueIPs { get; set; } = 0;
-        public long minDuration { get; set; } = long.MaxValue;
-        public long maxDuration { get; set; } = 0;
-        public double avgDuration { get; set; } = 0.0;
-        public long totalDuration { get; set; } = 0;
-        public List<string> ips = new List<string>();
-
-        public AnalyticsReferrer(string uri = "")
-        {
-            this.uri = uri;
-        }
     }
 
-    public class AnalyticsTime
+    [BsonIgnoreExtraElements]
+    public class AnalyticsAggregationQueryResult<T>
     {
+        public T _id { get; set; } = default(T);
         public long totalClicks { get; set; } = 0;
         public long totalUniqueIPs { get; set; } = 0;
+        public long minDuration { get; set; } = long.MaxValue;
+        public long maxDuration { get; set; } = 0;
+        public double avgDuration { get; set; } = 0.0;
+        public long totalDuration { get; set; } = 0;
+        public DateTime closeTime { get; set; } = DateTime.MinValue;
+        public List<string> ips = new List<string>();
+    }
+
+    [BsonIgnoreExtraElements]
+    public class AnalyticsTimeId
+    {
         public string time { get; set; } = "";
         public long unix { get; set; } = 0;
-        public long minDuration { get; set; } = long.MaxValue;
-        public long maxDuration { get; set; } = 0;
-        public double avgDuration { get; set; } = 0.0;
-        public long totalDuration { get; set; } = 0;
-
-        //public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
-        //public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<AnalyticsData> data = new List<AnalyticsData>();
-        public List<string> ips = new List<string>();
     }
-
-    public class AnalyticsScreen
+    
+    [BsonIgnoreExtraElements]
+    public class AnalyticsScreenId
     {
-        public long clicks { get; set; } = 0;
-        public long uniqueIPs { get; set; } = 0;
         public long screenWidth { get; set; } = 0;
         public long screenHeight { get; set; } = 0;
-        public long minDuration { get; set; } = long.MaxValue;
-        public long maxDuration { get; set; } = 0;
-        public double avgDuration { get; set; } = 0.0;
-        public long totalDuration { get; set; } = 0;
-
-        //public List<AnalyticsEndpoint> endpoints { get; set; } = new List<AnalyticsEndpoint>();
-        //public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<AnalyticsData> data = new List<AnalyticsData>();
-        public List<string> ips = new List<string>();
     }
-
-    public class AnalyticsEndpoint
+    
+    [BsonIgnoreExtraElements]
+    public class AnalyticsEndpointId
     {
         public string endpoint { get; set; } = "";
         public string fullUri { get; set; } = "";
         public string host { get; set; } = "";
-        public long clicks { get; set; } = 0;
-        public long minDuration { get; set; } = long.MaxValue;
-        public long maxDuration { get; set; } = 0;
-        public double avgDuration { get; set; } = 0.0;
-        public long totalDuration { get; set; } = 0;
-        public long uniqueIPs { get; set; } = 0;
-
-        public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<AnalyticsData> data = new List<AnalyticsData>();
-        public List<string> ips = new List<string>();
     }
-
-    public class AnalyticsCountry
+    
+    [BsonIgnoreExtraElements]
+    public class AnalyticsCountryId
     {
         public string countryCode { get; set; } = "";
-        public long clicks { get; set; } = 0;
-        public long minDuration { get; set; } = long.MaxValue;
-        public long maxDuration { get; set; } = 0;
-        public double avgDuration { get; set; } = 0.0;
-        public long totalDuration { get; set; } = 0;
-        public long uniqueIPs { get; set; } = 0;
-
-        public List<AnalyticsReferrer> referrers { get; set; } = new List<AnalyticsReferrer>();
-        public List<AnalyticsData> data = new List<AnalyticsData>();
-        public List<string> ips = new List<string>();
     }
-
+    
     public class AnalyticsResponse
     {
         public string type { get; set; } = "success";
