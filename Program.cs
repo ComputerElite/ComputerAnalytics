@@ -279,6 +279,21 @@ namespace ComputerAnalytics
 
                 return true;
             }));
+            server.AddRoute("GET", "/analytics/newusers", new Func<ServerRequest, bool>(request =>
+            {
+                if (IsNotLoggedIn(request)) return true;
+                try
+                {
+                    request.SendStringReplace(JsonSerializer.Serialize(collection.GetNewUsersPerDay(request)), "application/json", 200, replace);
+                }
+                catch (Exception e)
+                {
+                    Logger.Log("Error while crunching data:\n" + e.ToString(), LoggingType.Warning);
+                    request.SendString("Error: " + e.Message, "text/plain", 500);
+                }
+
+                return true;
+            }));
             server.AddRoute("GET", "/websites", new Func<ServerRequest, bool>(request =>
             {
                 if(GetToken(request) != collection.config.masterToken)
@@ -1047,6 +1062,16 @@ namespace ComputerAnalytics
             Logger.Log("Crunching Referrers of database for " + config.Websites[i].url + " just because of IsPinkCute == true");
             return databases[i].GetAllReferrersWithAssociatedData(null, queryString);
         }
+
+        public List<AnalyticsAggregationNewUsersResult> GetNewUsersPerDay(ServerRequest request)
+        {
+            string privateToken = request.cookies["token"] == null ? "" : request.cookies["token"].Value;
+            NameValueCollection queryString = request.queryString;
+            int i = GetDatabaseIndexWithPrivateToken(privateToken);
+            if (i == -1) return new List<AnalyticsAggregationNewUsersResult>();
+            Logger.Log("Crunching New Users per day of database for " + config.Websites[i].url + " because ComputerElite fucking took hours to create the mongodb query for this");
+            return databases[i].GetNewUsersPerDay(queryString);
+        }
     }
 
     class AnalyticsDatabase
@@ -1219,11 +1244,16 @@ namespace ComputerAnalytics
             */
         }
 
-        public BsonDocument GetFilter(BsonElement[] filters = null)
+        public long GetLastTimeUnix()
         {
             DateTime lastTime = DateTime.Now - new TimeSpan(days, hours, minutes, seconds);
             Logger.Log("Gettings Filter from " + lastTime.ToString() + " to " + DateTime.Now);
-            long lastTimeUnix = TimeConverter.DateTimeToUnixTimestamp(lastTime);
+            return TimeConverter.DateTimeToUnixTimestamp(lastTime);
+        }
+
+        public BsonDocument GetFilter(BsonElement[] filters = null)
+        {
+            long lastTimeUnix = GetLastTimeUnix();
             BsonDocument filter = new BsonDocument("sideClose", new BsonDocument("$gte", lastTimeUnix));
             //if (host != null && d.host != host) return true;
             if (endpoint != null) filter.Add(new BsonElement("endpoint", endpoint));
@@ -1281,6 +1311,122 @@ namespace ComputerAnalytics
                     }),
                     new BsonDocument("$sort", new BsonDocument("totalClicks", -1))
                 };
+        }
+
+        public BsonDocument[] GetNewUsersPerDayQuery()
+        {
+            return new BsonDocument[]
+            {
+                new BsonDocument("$sort",
+                new BsonDocument("sideClose", 1)),
+                new BsonDocument("$group",
+                new BsonDocument
+                    {
+                        { "_id",
+                new BsonDocument("remote", "$remote") },
+                        { "firstDate",
+                new BsonDocument("$first", "$closeTime") },
+                        { "ipCount",
+                new BsonDocument("$sum", 1) },
+                        { "allDates",
+                new BsonDocument("$push", "$closeTime") }
+                    }),
+                new BsonDocument("$unwind", "$allDates"),
+                new BsonDocument("$group",
+                new BsonDocument
+                    {
+                        { "_id",
+                new BsonDocument
+                        {
+                            { "time",
+                new BsonDocument("$concat",
+                new BsonArray
+                                {
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$dayOfMonth",
+                                    new BsonDocument("$toDate", "$allDates"))),
+                                    ".",
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$month",
+                                    new BsonDocument("$toDate", "$allDates"))),
+                                    ".",
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$year",
+                                    new BsonDocument("$toDate", "$allDates")))
+                                }) },
+                            { "remote", "$_id.remote" }
+                        } },
+                        { "totalClicks",
+                new BsonDocument("$sum", 1) },
+                        { "newClicks",
+                new BsonDocument("$first",
+                new BsonDocument("$switch",
+                new BsonDocument
+                                {
+                                    { "default", 0 },
+                                    { "branches",
+                new BsonArray
+                                    {
+                                        new BsonDocument
+                                        {
+                                            { "case",
+                                        new BsonDocument("$eq",
+                                        new BsonArray
+                                                {
+                                                    new BsonDocument("$dayOfMonth",
+                                                    new BsonDocument("$toDate", "$allDates")),
+                                                    new BsonDocument("$dayOfMonth",
+                                                    new BsonDocument("$toDate", "$firstDate"))
+                                                }) },
+                                            { "then", 1 }
+                                        }
+                                    } }
+                                })) }
+                    }),
+                new BsonDocument("$group",
+                new BsonDocument
+                    {
+                        { "_id",
+                new BsonDocument("time", "$_id.time") },
+                        { "totalClicks",
+                new BsonDocument("$sum", "$totalClicks") },
+                        { "newIPs",
+                new BsonDocument("$sum", "$newClicks") },
+                        { "totalUniqueIPs",
+                new BsonDocument("$sum", 1) }
+                    }),
+                new BsonDocument("$addFields",
+                new BsonDocument
+                    {
+                        { "returningIPs",
+                new BsonDocument("$subtract",
+                new BsonArray
+                            {
+                                "$totalUniqueIPs",
+                                "$newIPs"
+                            }) },
+                        { "sideClose",
+                new BsonDocument("$toDate", "$_id.time") }
+                    }),
+                new BsonDocument("$sort",
+                new BsonDocument("sideClose", 1)),
+                new BsonDocument("$addFields",
+                new BsonDocument("sideCloseLong",
+                new BsonDocument("$toLong", "$sideClose"))),
+                new BsonDocument("$match",
+                new BsonDocument("sideCloseLong",
+                new BsonDocument("$gte", TimeConverter.DateTimeToJavaTimestamp(TimeConverter.UnixTimeStampToDateTime(GetLastTimeUnix())))))
+            };
+        }
+
+        public List<AnalyticsAggregationNewUsersResult> GetNewUsersPerDay(NameValueCollection queryString)
+        {
+            PreCalculate(queryString);
+            if(!parentCollection.config.useMongoDB)
+            {
+                return new List<AnalyticsAggregationNewUsersResult>();
+            }
+            return documents.Aggregate<AnalyticsAggregationNewUsersResult>(GetNewUsersPerDayQuery()).ToList();
         }
 
         public List<AnalyticsAggregationQueryResult<AnalyticsEndpointId>> GetAllEndpointsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)

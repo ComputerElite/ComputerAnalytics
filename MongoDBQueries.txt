@@ -1,0 +1,131 @@
+﻿Reliable: Get amount of returning and new IPs:
+[
+    {
+        "$sort": {
+            "sideClose": 1
+        }
+    },
+    {
+        "$group": {
+            "_id": {
+                "remote": "$remote"
+            },
+            "firstDate": {
+                "$first": "$closeTime"
+            },
+            "ipCount": {
+                "$sum": 1
+            },
+            "allDates": {
+                "$push": "$closeTime"
+            }
+        }
+    },
+    {
+        "$unwind": "$allDates"
+    },
+    {
+        "$group": {
+            "_id": {
+                "time": {
+                    "$concat": [
+                        {
+                            "$toString": {
+                                "$dayOfMonth": {
+                                    "$toDate": "$allDates"
+                                }
+                            }
+                        },
+                        "-",
+                        {
+                            "$toString": {
+                                "$month": {
+                                    "$toDate": "$allDates"
+                                }
+                            }
+                        },
+                        "-",
+                        {
+                            "$toString": {
+                                "$year": {
+                                    "$toDate": "$allDates"
+                                }
+                            }
+                        }
+                    ]
+                },
+                "remote": "$_id.remote"
+            },
+            "totalClicks": {
+                "$sum": 1
+            },
+            "newClicks": {
+                "$first": {
+                    "$switch": {
+                        "default": 0,
+                        "branches": [
+                            {
+                                "case": {
+                                    "$eq": [
+                                        {
+                                            "$dayOfMonth": {
+                                                "$toDate": "$allDates"
+                                            }
+                                        },
+                                        {
+                                            "$dayOfMonth": {
+                                                "$toDate": "$firstDate"
+                                            }
+                                        }
+                                    ]
+                                },
+                                "then": 1
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    },
+    {
+        "$group": {
+            "_id": {
+                "time": "$_id.time"
+            },
+            "totalClicks": {
+                "$sum": "$totalClicks"
+            },
+            "newIPs": {
+                "$sum": "$newClicks"
+            },
+            "totalUniqueIPs": {
+                "$sum": 1
+            }
+        }
+    },
+    {
+        "$addFields": {
+            "returningIPs": {
+                "$subtract": [
+                    "$totalUniqueIPs",
+                    "$newIPs"
+                ]
+            },
+            "sideClose": {
+                "$toDate": "$_id.time"
+            }
+        }
+    },
+    {
+        "$sort": {
+            "sideClose": -1
+        }
+    },
+    {
+        "$match": {
+            "sideCloseLong": {
+                "$gte": 16341466437000
+            }
+        }
+    }
+]

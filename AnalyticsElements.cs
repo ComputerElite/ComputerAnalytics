@@ -29,6 +29,14 @@ namespace ComputerAnalytics
     }
 
     [BsonIgnoreExtraElements]
+    public class AnalyticsAggregationNewUsersResult : AnalyticsAggregationQueryResult<AnalyticsTimeId>
+    {
+        public long newIPs { get; set; } = 0;
+        public long returningIPs { get; set; } = 0;
+
+    }
+
+    [BsonIgnoreExtraElements]
     public class AnalyticsTimeId
     {
         public string time { get; set; } = "";

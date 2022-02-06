@@ -4,6 +4,7 @@
     GET /analytics/referrers
     GET /analytics/hosts
     GET /analytics/countries
+    GET /analytics/newusers (ignores every query options except days, hours, minutes and seconds)
 
 You may get a Gateway timeout (504) and high response times the first (few) times you look at analytics
 

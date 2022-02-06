@@ -89,9 +89,11 @@
                 plot_bgcolor: "#222222",
                 paper_bgcolor: "#222222"
             }
-            fetch("/analytics/time?" + param.toString()).then(res => res.json().then(json => {
+            fetch("/analytics/newusers?" + param.toString()).then(res => res.json().then(json => {
                 var clicks = {x: [], y: [], fill: 'tozeroy', type: "scatter", line: {color: "#1a9c00", width: 3}, name: "clicks", marker: {size: 8}}
                 var users = {x: [], y: [], fill: 'tozeroy', type: "scatter", line: {color: "#00419c", width: 3}, name: "unique ips", marker: {size: 8}}
+                var newusers = {x: [], y: [], fill: 'tozeroy', type: "scatter", line: {color: "#fcd703", width: 3}, name: "new ips", marker: {size: 8}}
+                var returningusers = {x: [], y: [], fill: 'tozeroy', type: "scatter", line: {color: "#fc0303", width: 3}, name: "returning ips", marker: {size: 8}}
                 var mostClicks = 0
                 var mostIps = 0
                 var l = param.get("landscape")
@@ -109,9 +111,13 @@
                     else {
                         users.y.push(element.totalUniqueIPs)
                     }
+                    newusers.x.push(element._id.time)
+                    newusers.y.push(element.newIPs)
+                    returningusers.x.push(element._id.time)
+                    returningusers.y.push(element.returningIPs)
                 });
                 document.getElementById(trafficDateContainer).innerHTML = ""
-                Plotly.newPlot(trafficDateContainer, [clicks, users], layout)
+                Plotly.newPlot(trafficDateContainer, [clicks, users, newusers, returningusers], layout)
                 document.getElementById(trafficDateContainer).on('plotly_click', function(data){
                     var pts = '';
                     for(var i=0; i < data.points.length; i++){
@@ -166,11 +172,6 @@
                                     <td class="top">Users</td>
                                     <td class="top">avg. time on site</td>
                                 </tr>`
-                json.sort((a, b) => {
-                    if (a.totalClicks < b.totalClicks) return 1;
-                    if (a.totalClicks > b.totalClicks) return -1;
-                    return 0;
-                })
                 totalClicks = 0
                 json.forEach(e => {
                     totalClicks += e.totalClicks
@@ -196,11 +197,6 @@
                                     <td class="top">Users</td>
                                     <td class="top">avg. time on site</td>
                                 </tr>`
-                json.sort((a, b) => {
-                    if (a.totalClicks < b.totalClicks) return 1;
-                    if (a.totalClicks > b.totalClicks) return -1;
-                    return 0;
-                })
                 totalClicks = 0
                 json.forEach(e => {
                     totalClicks += e.totalClicks
@@ -257,11 +253,6 @@
                                 <td class="top">avg. time on site</td>
                             </tr>`
                 var total = 0
-                json.sort((a, b) => {
-                    if (a.totalClicks < b.totalClicks) return 1;
-                    if (a.totalClicks > b.totalClicks) return -1;
-                    return 0;
-                })
                 json.forEach(e => {
                     total += e.totalClicks
                 });
