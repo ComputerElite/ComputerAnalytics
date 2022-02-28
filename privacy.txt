@@ -13,12 +13,12 @@ II. What data is being collected
 		- Your devices screen width and height which may or may not be accurate
 	2. Data by the http request (those are default with everything you send over the internet)
 		- Your IP address. It is being used to count a estimate of individuals visiting the site{1}. It's being stored as hash so it's harder to assocate with someone. On top of that your IP address usually changes every few days/weeks.
-		- Your User Agent. This is usually your browser and operatin system
+		- Your User Agent. This is usually your browser and operating system
 
 	3. Data which is NOT being collected
 		- Your name, email address, login information, passwords or anything of that kind
 		- The mouse movements and keyboard strokes you do on the site
-		- Everything else which isn't listed top
+		- Everything else which isn't listed above
 
 III. How is the data being stored?
 	The data can be stored in 2 ways depending on the host. On this site it is stored {0}. Read the associated section belog

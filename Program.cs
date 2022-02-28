@@ -3,6 +3,7 @@ using ComputerUtils.Discord;
 using ComputerUtils.Encryption;
 using ComputerUtils.FileManaging;
 using ComputerUtils.Logging;
+using ComputerUtils.QR;
 using ComputerUtils.RandomExtensions;
 using ComputerUtils.StringFormatters;
 using ComputerUtils.VarUtils;
@@ -12,7 +13,9 @@ using MongoDB.Bson.IO;
 using MongoDB.Bson.Serialization;
 using MongoDB.Bson.Serialization.Attributes;
 using MongoDB.Driver;
+using QRCoder;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Diagnostics;
@@ -33,9 +36,11 @@ namespace ComputerAnalytics
     {
         static void Main(string[] args)
         {
+            Logger.displayLogInConsole = true;
             CommandLineCommandContainer cla = new CommandLineCommandContainer(args);
             cla.AddCommandLineArgument(new List<string> { "--workingdir" }, false, "Sets the working Directory for ComputerAnalytics", "directory", "");
             cla.AddCommandLineArgument(new List<string> { "update", "--update", "-U" }, true, "Starts in update mode (use with caution. It's best to let it do on it's own)");
+            cla.AddCommandLineArgument(new List<string> { "--displayMasterToken", "-dmt" }, true, "Outputs the master token without starting the server");
             if (cla.HasArgument("help"))
             {
                 cla.ShowHelp();
@@ -67,7 +72,15 @@ namespace ComputerAnalytics
                 Process.Start(i);
                 Environment.Exit(0);
             }
+            Config c = JsonSerializer.Deserialize<Config>(File.ReadAllText(workingDir + "analytics" + Path.DirectorySeparatorChar + "config.json"));
+            if (cla.HasArgument("-dmt"))
+            {
+                QRCodeGeneratorWrapper.Display(c.masterToken);
+                return;
+            }
             AnalyticsServer s = new AnalyticsServer();
+            if (!workingDir.EndsWith(Path.DirectorySeparatorChar)) workingDir += Path.DirectorySeparatorChar;
+            if (workingDir == Path.DirectorySeparatorChar.ToString()) workingDir = AppDomain.CurrentDomain.BaseDirectory;
             s.workingDir = workingDir;
             HttpServer server = new HttpServer();
             s.AddToServer(server);

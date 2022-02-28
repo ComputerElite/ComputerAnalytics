@@ -26,19 +26,19 @@
             <div class="loading"></div>
         </div>
         <h1>Endpoints</h1>
-        <table id="endpoints" style="display: flex; flex-wrap: wrap; width: 100%;">
+        <table id="endpoints">
             <tr><td><div class="loading"></div></td></tr>
         </table>
         <h1>Countries</h1>
-        <table id="countries" style="display: flex; flex-wrap: wrap; width: 100%;">
+        <table id="countries">
             <tr><td><div class="loading"></div></td></tr>
         </table>
         <h1>Referrers</h1>
-        <table id="referrers" style="display: flex; flex-wrap: wrap; width: 100%;">
+        <table id="referrers">
             <tr><td><div class="loading"></div></td></tr>
         </table>
         <h1>Screens</h1>
-        <table id="screens" style="flex-wrap: wrap; width: 100%;">
+        <table id="screens">
             <tr><td><div class="loading"></div></td></tr>
         </table>
     </div>
@@ -50,7 +50,7 @@
         var regionNames = new Intl.DisplayNames(["en"], {type: 'region'});
 
         param.forEach((v, k) => {
-            document.getElementById("filters").innerHTML += `<div>${k}: ${v}</div>`
+            document.getElementById("filters").innerHTML += `<tr><td>${k}</td><td>${v}</td></div>`
         })
 
         document.getElementById("days").value = param.get("days")
