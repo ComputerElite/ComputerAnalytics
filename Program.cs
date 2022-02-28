@@ -1330,6 +1330,7 @@ namespace ComputerAnalytics
         {
             return new BsonDocument[]
             {
+                GetFilter(),
                 new BsonDocument("$sort",
                 new BsonDocument("sideClose", 1)),
                 new BsonDocument("$group",
