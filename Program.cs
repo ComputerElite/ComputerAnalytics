@@ -172,7 +172,7 @@ namespace ComputerAnalytics
                 {
                     collection.config.rejectedAnalytics++;
                     collection.SaveConfig();
-                    SendMasterWebhookMessage("ComputerAnalytics rejected analytic", "**Reason:** `" + e.Message + "`\n**UA:** `" + request.context.Request.UserAgent + "`", 0xDA3633);
+                    //SendMasterWebhookMessage("ComputerAnalytics rejected analytic", "**Reason:** `" + e.Message + "`\n**UA:** `" + request.context.Request.UserAgent + "`", 0xDA3633);
                     Logger.Log("Error while recieving analytics json:\n" + e.ToString(), LoggingType.Warning);
                     request.SendString(new AnalyticsResponse("error", e.Message).ToString(), "application/json", 500, true, new Dictionary<string, string>() { { "Access-Control-Allow-Origin", origin }, { "Access-Control-Allow-Credentials", "true" } });
                     return true;
