@@ -45,7 +45,7 @@ namespace ComputerAnalytics
                 cla.ShowHelp();
                 return;
             }
-
+            
             string workingDir = cla.GetValue("--workingdir");
             if (cla.HasArgument("update"))
             {
@@ -71,6 +71,8 @@ namespace ComputerAnalytics
                 Process.Start(i);
                 Environment.Exit(0);
             }
+            if (!workingDir.EndsWith(Path.DirectorySeparatorChar)) workingDir += Path.DirectorySeparatorChar;
+            if (workingDir == Path.DirectorySeparatorChar.ToString()) workingDir = AppDomain.CurrentDomain.BaseDirectory;
             Config c = JsonSerializer.Deserialize<Config>(File.ReadAllText(workingDir + "analytics" + Path.DirectorySeparatorChar + "config.json"));
             if (cla.HasArgument("-dmt"))
             {
@@ -78,8 +80,6 @@ namespace ComputerAnalytics
                 return;
             }
             AnalyticsServer s = new AnalyticsServer();
-            if (!workingDir.EndsWith(Path.DirectorySeparatorChar)) workingDir += Path.DirectorySeparatorChar;
-            if (workingDir == Path.DirectorySeparatorChar.ToString()) workingDir = AppDomain.CurrentDomain.BaseDirectory;
             s.workingDir = workingDir;
             HttpServer server = new HttpServer();
             s.AddToServer(server);
@@ -1263,11 +1263,12 @@ namespace ComputerAnalytics
             return TimeConverter.DateTimeToUnixTimestamp(lastTime);
         }
 
-        public BsonDocument GetFilter(BsonElement[] filters = null)
+        public BsonDocument GetFilter(BsonElement[] filters = null, bool withTime = true)
         {
             long lastTimeUnix = GetLastTimeUnix();
-            BsonDocument filter = new BsonDocument("sideClose", new BsonDocument("$gte", lastTimeUnix));
+            BsonDocument filter = new BsonDocument();
             //if (host != null && d.host != host) return true;
+            if (withTime) filter.Add(new BsonElement("sideClose", new BsonDocument("$gte", lastTimeUnix)));
             if (endpoint != null) filter.Add(new BsonElement("endpoint", endpoint));
             if (referrer != null) filter.Add(new BsonElement("referrer", referrer));
             if (screenwidth != null) filter.Add(new BsonElement("screenWidth", screenwidth));
@@ -1329,7 +1330,7 @@ namespace ComputerAnalytics
         {
             return new BsonDocument[]
             {
-                GetFilter(),
+                GetFilter(null, false),
                 new BsonDocument("$sort",
                 new BsonDocument("sideClose", 1)),
                 new BsonDocument("$group",

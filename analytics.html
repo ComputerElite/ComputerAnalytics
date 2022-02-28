@@ -22,6 +22,9 @@
                 <option value="minute">Minute</option>
             </select>
         </h1>
+        <table id="trafficTotals">
+            <tr><td><div class="loading"></div></td></tr>
+        </table>
         <div id="trafficDateContainer">
             <div class="loading"></div>
         </div>
@@ -103,9 +106,12 @@
                         if(mostIps < element.totalUniqueIPs) totalUniqueIPs = element.totalUniqueIPs
                     })
                 }
+                var totalClicks = 0
+                var totalUsers = json[0].returningIPs
                 json.forEach(element => {
                     clicks.x.push(element._id.time)
                     clicks.y.push(element.totalClicks)
+                    totalClicks += element.totalClicks
                     users.x.push(element._id.time)
                     if(l) users.y.push(mostClicks + 1000 + mostIps - element.totalUniqueIPs)
                     else {
@@ -113,8 +119,10 @@
                     }
                     newusers.x.push(element._id.time)
                     newusers.y.push(element.newIPs)
+                    totalUsers += element.newIPs
                     returningusers.x.push(element._id.time)
                     returningusers.y.push(element.returningIPs)
+                   
                 });
                 document.getElementById(trafficDateContainer).innerHTML = ""
                 Plotly.newPlot(trafficDateContainer, [clicks, users, newusers, returningusers], layout)
@@ -125,6 +133,10 @@
                     }
                     SetTime(pts)
                 });
+                document.getElementById("trafficTotals").innerHTML =    `
+                                                                            <tr><td>Total Clicks</td><td>${totalClicks}</td></tr>
+                                                                            <tr><td>Total Users</td><td>${totalUsers}</td></tr>
+                                                                        `
             }).catch(e => {
                 console.log(e)
                 Issue(currentReload)
