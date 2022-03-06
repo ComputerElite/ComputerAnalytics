@@ -43,10 +43,6 @@
                             <td><input placeholder="Public token" type="text" id="public" style="width: 700px;"></td>
                         </tr>
                         <tr>
-                            <td class="left">Private Token</td>
-                            <td><input placeholder="private token" type="text" id="private" style="width: 700px;"></td>
-                        </tr>
-                        <tr>
                             <td class="left">Website URL</td>
                             <td><input placeholder="website url" type="text" id="url" style="width: 700px;"></td>
                         </tr>
@@ -120,16 +116,14 @@
                 input.click()
             }
             var spublic = ""
-            var sprivate = ""
             var surl = ""
-            function Delete(url, private, public) {
-                sprivate = private
+            function Delete(url, public) {
                 spublic = public
                 surl = url
                 document.getElementById('confirm').style.visibility = 'visible'
             }
             function RealDelete() {
-                if(document.getElementById("private").value == sprivate && document.getElementById("url").value == surl && document.getElementById("public").value == spublic) {
+                if(document.getElementById("url").value == surl && document.getElementById("public").value == spublic) {
                     fetch("/website", {
                         method: "DELETE",
                         body: surl
@@ -140,7 +134,7 @@
                         })
                     })
                 } else {
-                    alert("Private token, public token and url must match the website you want to delete")
+                    alert("public token and url must match the website you want to delete")
                 }
             }
             function Restart() {
@@ -246,7 +240,7 @@
                                                     <input type="datetime-local" id="${e.url}">
                                                     <div class="customButton" onclick="AddToken('${e.url}', document.getElementById('${e.url}').value)">Add Token</div>
                                                 </div>
-                                                <div class="customButton" onclick="Delete('${e.url}', '${e.privateToken}', '${e.publicToken}')" style="background-color: #DA3633">Delete Website (not undoable)</div>
+                                                <div class="customButton" onclick="Delete('${e.url}', '${e.publicToken}')" style="background-color: #DA3633">Delete Website (not undoable)</div>
                                             </div>`
                         i++
                     })
