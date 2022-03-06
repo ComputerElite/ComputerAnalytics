@@ -1326,11 +1326,11 @@ namespace ComputerAnalytics
                 };
         }
 
-        public BsonDocument[] GetNewUsersPerDayQuery()
+        public BsonDocument[] GetNewUsersPerDayQuery(BsonArray time, BsonArray time2, BsonDocument sort)
         {
             return new BsonDocument[]
             {
-                GetFilter(null, false),
+                GetFilter(null, true), // might wanna change that to false for more accurate results. But it's harder to filter after doing all the stuff below so you should filter by time here
                 new BsonDocument("$sort",
                 new BsonDocument("sideClose", 1)),
                 new BsonDocument("$group",
@@ -1354,24 +1354,14 @@ namespace ComputerAnalytics
                         {
                             { "time",
                 new BsonDocument("$concat",
-                new BsonArray
-                                {
-                                    new BsonDocument("$toString",
-                                    new BsonDocument("$dayOfMonth",
-                                    new BsonDocument("$toDate", "$allDates"))),
-                                    ".",
-                                    new BsonDocument("$toString",
-                                    new BsonDocument("$month",
-                                    new BsonDocument("$toDate", "$allDates"))),
-                                    ".",
-                                    new BsonDocument("$toString",
-                                    new BsonDocument("$year",
-                                    new BsonDocument("$toDate", "$allDates")))
-                                }) },
+                time) },
                             { "remote", "$_id.remote" }
                         } },
                         { "totalClicks",
                 new BsonDocument("$sum", 1) },
+                        {
+                            "sideClose", new BsonDocument("$first", sort)
+                        },
                         { "newClicks",
                 new BsonDocument("$first",
                 new BsonDocument("$switch",
@@ -1387,10 +1377,8 @@ namespace ComputerAnalytics
                                         new BsonDocument("$eq",
                                         new BsonArray
                                                 {
-                                                    new BsonDocument("$dayOfMonth",
-                                                    new BsonDocument("$toDate", "$allDates")),
-                                                    new BsonDocument("$dayOfMonth",
-                                                    new BsonDocument("$toDate", "$firstDate"))
+                                                    new BsonDocument("$concat", time),
+                                                    new BsonDocument("$concat", time2),
                                                 }) },
                                             { "then", 1 }
                                         }
@@ -1407,7 +1395,8 @@ namespace ComputerAnalytics
                         { "newIPs",
                 new BsonDocument("$sum", "$newClicks") },
                         { "totalUniqueIPs",
-                new BsonDocument("$sum", 1) }
+                new BsonDocument("$sum", 1) },
+                    {"sideClose", new BsonDocument("$first", "$sideClose")}
                     }),
                 new BsonDocument("$addFields",
                 new BsonDocument
@@ -1418,18 +1407,18 @@ namespace ComputerAnalytics
                             {
                                 "$totalUniqueIPs",
                                 "$newIPs"
-                            }) },
-                        { "sideClose",
-                new BsonDocument("$toDate", "$_id.time") }
-                    }),
+                            }
+                        )
+                    }
+                }),
                 new BsonDocument("$sort",
                 new BsonDocument("sideClose", 1)),
-                new BsonDocument("$addFields",
-                new BsonDocument("sideCloseLong",
-                new BsonDocument("$toLong", "$sideClose"))),
-                new BsonDocument("$match",
-                new BsonDocument("sideCloseLong",
-                new BsonDocument("$gte", TimeConverter.DateTimeToJavaTimestamp(TimeConverter.UnixTimeStampToDateTime(GetLastTimeUnix())))))
+                //new BsonDocument("$addFields",
+                //new BsonDocument("sideCloseLong",
+                //new BsonDocument("$toLong", "$sideClose"))),
+                //new BsonDocument("$match",
+                //new BsonDocument("sideClose",
+                //new BsonDocument("$gte", TimeConverter.DateTimeToJavaTimestamp(TimeConverter.UnixTimeStampToDateTime(GetLastTimeUnix())))))
             };
         }
 
@@ -1440,7 +1429,74 @@ namespace ComputerAnalytics
             {
                 return new List<AnalyticsAggregationNewUsersResult>();
             }
-            return documents.Aggregate<AnalyticsAggregationNewUsersResult>(GetNewUsersPerDayQuery()).ToList();
+            BsonArray time = new BsonArray();
+            BsonArray time2 = new BsonArray();
+            BsonDocument sort = new BsonDocument();
+            if(timeunit == TimeUnit.date)
+            {
+                time = new BsonArray
+                                {
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$dayOfMonth",
+                                    new BsonDocument("$toDate", "$allDates"))),
+                                    ".",
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$month",
+                                    new BsonDocument("$toDate", "$allDates"))),
+                                    ".",
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$year",
+                                    new BsonDocument("$toDate", "$allDates")))
+                                };
+                time2 = new BsonArray
+                                {
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$dayOfMonth",
+                                    new BsonDocument("$toDate", "$firstDate"))),
+                                    ".",
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$month",
+                                    new BsonDocument("$toDate", "$firstDate"))),
+                                    ".",
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$year",
+                                    new BsonDocument("$toDate", "$firstDate")))
+                                };
+                sort = new BsonDocument("$toDate", "$allDates");
+            } else if(timeunit == TimeUnit.hour)
+            {
+                time = new BsonArray
+                                {
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$hour",
+                                    new BsonDocument("$toDate", "$allDates")))
+                                };
+                time2 = new BsonArray
+                                {
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$hour",
+                                    new BsonDocument("$toDate", "$firstDate")))
+                                };
+                sort = new BsonDocument("$hour", new BsonDocument("$toDate", "$allDates"));
+            }
+            else if (timeunit == TimeUnit.minute)
+            {
+                time = new BsonArray
+                                {
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$minute",
+                                    new BsonDocument("$toDate", "$allDates")))
+                                };
+                time2 = new BsonArray
+                                {
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$minute",
+                                    new BsonDocument("$toDate", "$firstDate")))
+                                };
+                sort = new BsonDocument("$minute", new BsonDocument("$toDate", "$allDates"));
+            }
+            Logger.Log(GetNewUsersPerDayQuery(time, time2, sort).ToJson(), LoggingType.Debug);
+            return documents.Aggregate<AnalyticsAggregationNewUsersResult>(GetNewUsersPerDayQuery(time, time2, sort)).ToList();
         }
 
         public List<AnalyticsAggregationQueryResult<AnalyticsEndpointId>> GetAllEndpointsWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
