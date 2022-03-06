@@ -1495,7 +1495,6 @@ namespace ComputerAnalytics
                                 };
                 sort = new BsonDocument("$minute", new BsonDocument("$toDate", "$allDates"));
             }
-            Logger.Log(GetNewUsersPerDayQuery(time, time2, sort).ToJson(), LoggingType.Debug);
             return documents.Aggregate<AnalyticsAggregationNewUsersResult>(GetNewUsersPerDayQuery(time, time2, sort)).ToList();
         }
 
