@@ -11,7 +11,7 @@ You may get a Gateway timeout (504) and high response times the first (few) time
 Query Strings (for all endpoints; none required):
     host:        Filter for analytics on this host (deprecated)
     endpoint:    Filter for analytics on this endpoint
-    time:        Filters for analytics with time (either 'dd.MM.yyyy', 'HH' or 'mm' based on timeunit)
+    time:        Filters for analytics with time (either 'd.M.yyyy', 'HH' or 'mm' based on timeunit)
     timeunit:    Any of 'date', 'hour' and 'minute' (default: 'date')
     referrer:    Filter for analytics from this referrer
     deep:        presence of this query string will give back more in depth data (this may result in a gateway timeout and even higher response times; won't work on every endpoint)

@@ -1273,6 +1273,42 @@ namespace ComputerAnalytics
             if (referrer != null) filter.Add(new BsonElement("referrer", referrer));
             if (screenwidth != null) filter.Add(new BsonElement("screenWidth", screenwidth));
             if (screenheight != null) filter.Add(new BsonElement("screenHeight", screenheight));
+            if(time != null)
+            {
+                if(timeunit == TimeUnit.date)
+                {
+                    filter.Add("$expr", new BsonDocument("$eq", new BsonArray { new BsonDocument("$concat", new BsonArray
+                                {
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$dayOfMonth",
+                                    new BsonDocument("$toDate", "$closeTime"))),
+                                    ".",
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$month",
+                                    new BsonDocument("$toDate", "$closeTime"))),
+                                    ".",
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$year",
+                                    new BsonDocument("$toDate", "$closeTime")))
+                                }), time }));
+                }
+                else if (timeunit == TimeUnit.hour)
+                {
+                    filter.Add("$expr", new BsonDocument("$eq", new BsonArray { 
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$hour",
+                                    new BsonDocument("$toDate", "$closeTime")))
+                                ,time }));
+                }
+                else if (timeunit == TimeUnit.minute)
+                {
+                    filter.Add("$expr", new BsonDocument("$eq", new BsonArray {
+                                    new BsonDocument("$toString",
+                                    new BsonDocument("$minute",
+                                    new BsonDocument("$toDate", "$closeTime")))
+                                ,time }));
+                }
+            }
             if(filters != null)
             {
                 foreach (BsonElement filterElement in filters) filter.Add(filterElement);
@@ -1596,6 +1632,15 @@ namespace ComputerAnalytics
             return "";
         }
 
+        public string GetTimeString(long unix)
+        {
+            DateTime openTime = TimeConverter.UnixTimeStampToDateTime(unix);
+            if (timeunit == TimeUnit.date) return openTime.ToString("d.M.yyyy");
+            if (timeunit == TimeUnit.hour) return openTime.ToString("HH");
+            if (timeunit == TimeUnit.minute) return openTime.ToString("mm");
+            return "";
+        }
+
         public List<AnalyticsAggregationQueryResult<AnalyticsTimeId>> GetAllEndpointsSortedByTimeWithAssociatedData(List<AnalyticsData> usedData = null, NameValueCollection queryString = null)
         {
             PreCalculate(queryString);
@@ -1766,7 +1811,7 @@ namespace ComputerAnalytics
         public string screenwidth = null;
         public string screenheight = null;
         public TimeUnit timeunit = TimeUnit.date;
-        public string[] time = null;
+        public string time = null;
         public bool deep = false;
         public string countryCode = null;
 
@@ -1786,7 +1831,7 @@ namespace ComputerAnalytics
             screenheight = c.Get("screenheight");
             screenwidth = c.Get("screenwidth");
             timeunit = (TimeUnit)Enum.Parse(typeof(TimeUnit), c.Get("timeunit") == null ? "date" : c.Get("timeunit").ToLower());
-            time = c.Get("time") == null ? null : c.Get("time").Split(',');
+            time = c.Get("time") == null ? null : c.Get("time");
             deep = c.Get("deep") != null;
             countryCode = c.Get("countrycode") == null ? null : c.Get("countrycode").ToLower();
 

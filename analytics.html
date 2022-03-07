@@ -79,6 +79,7 @@
         }
         document.getElementById("timeUnit").onchange = (ev) => {
             param.set("timeunit", ev.target.value)
+            param.delete("time")
             Reload()
         }
         ReloadAllData()
