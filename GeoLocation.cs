@@ -57,7 +57,7 @@ namespace ComputerAnalytics
 
         public static AnonymisedGeoLocationQueryResponse GetAnonymisedGeoLocation(string ip)
         {
-            return (AnonymisedGeoLocationQueryResponse)GetGeoLocation(ip);
+            return (AnonymisedGeoLocationQueryResponse)GetGeoLocation(ip.Split(',')[0]);
         }
     }
 }
