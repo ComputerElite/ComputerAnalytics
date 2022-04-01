@@ -73,6 +73,7 @@ namespace ComputerAnalytics
             }
             if (!workingDir.EndsWith(Path.DirectorySeparatorChar)) workingDir += Path.DirectorySeparatorChar;
             if (workingDir == Path.DirectorySeparatorChar.ToString()) workingDir = AppDomain.CurrentDomain.BaseDirectory;
+            if (!File.Exists(workingDir + "analytics" + Path.DirectorySeparatorChar + "config.json")) File.WriteAllText(workingDir + "analytics" + Path.DirectorySeparatorChar + "config.json", JsonSerializer.Serialize(new Config()));
             Config c = JsonSerializer.Deserialize<Config>(File.ReadAllText(workingDir + "analytics" + Path.DirectorySeparatorChar + "config.json"));
             if (cla.HasArgument("-dmt"))
             {
@@ -109,7 +110,6 @@ namespace ComputerAnalytics
             Logger.Log("Analytics directory is " + workingDir + "analytics");
             collection = new AnalyticsDatabaseCollection(this);
             this.server = httpServer;
-            server.StartServer(collection.config.port);
             Logger.Log("Public address: " + collection.GetPublicAddress());
             SendMasterWebhookMessage("Server started", "The server has just started", 0x42BBEB);
             Thread warningSystemsAndSiteMetrics = new Thread(() =>
@@ -510,6 +510,43 @@ namespace ComputerAnalytics
                 Environment.Exit(0);
                 return true;
             }));
+            server.AddRoute("POST", "/updateoculusdb", new Func<ServerRequest, bool>(request =>
+            {
+                if (GetToken(request) != collection.config.masterToken)
+                {
+                    request.Send403();
+                    return true;
+                }
+                FileManager.RecreateDirectoryIfExisting("/mnt/DiscoExt/OculusDB/updater");
+                SendMasterWebhookMessage("OculusDB vy ComputerAnalytics Update Deployed", "**Changelog:** `" + (request.queryString.Get("changelog") == null ? "none" : request.queryString.Get("changelog")) + "`", 0x42BBEB);
+                string zip = "/mnt/DiscoExt/OculusDB/updater" + Path.DirectorySeparatorChar + "update.zip";
+                File.WriteAllBytes(zip, request.bodyBytes);
+                request.SendString("Starting update. Please wait a bit and come back.");
+                string destDir = "/mnt/DiscoExt/OculusDB/";
+                using (ZipArchive archive = ZipFile.OpenRead(zip))
+                {
+                    foreach (ZipArchiveEntry entry in archive.Entries)
+                    {
+                        String name = entry.FullName;
+                        if (name.EndsWith("/")) continue;
+                        if (name.Contains("/")) Directory.CreateDirectory(destDir + Path.GetDirectoryName(name));
+                        entry.ExtractToFile(destDir + entry.FullName, true);
+                    }
+                }
+                ProcessStartInfo i = new ProcessStartInfo
+                {
+                    FileName = "dotnet",
+                    Arguments = "\"" + destDir + "OculusDB.dll\" --workingdir \"/mnt/DiscoExt/OculusDB/\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                Process p = Process.Start(i);
+                p.OutputDataReceived += (sender, args) =>
+                {
+                    Logger.Log("OculusDB: " + args.Data);
+                };
+                return true;
+            }));
             server.AddRoute("GET", "/console", new Func<ServerRequest, bool>(request =>
             {
                 if (GetToken(request) != collection.config.masterToken)
@@ -649,6 +686,7 @@ namespace ComputerAnalytics
             // Do all stuff after server setup
             collection.LoadAllDatabases(workingDir + "analytics");
             collection.ReorderDataOfAllDataSetsV1();
+            server.StartServer(collection.config.port);
         }
 
         public void HandleExeption(object sender, UnhandledExceptionEventArgs args)

@@ -11,6 +11,7 @@
             <input placeholder="IP Address" type="text" id="ip">
             <div onclick="IP()" class="customButton">Set public address</div>
             <div onclick="Update()" class="customButton">Update server</div>
+            <div onclick="UpdateOculusDB()" class="customButton">Update OculusDB server</div>
             <div style="width: 90%; background-color: #bbbbbb; height: 10px;"><div style="background-color: #42bbeb; height: 100%; width: 0%;" id="progress"></div></div>
             <div onclick="Export()" class="customButton">Export all data</div>
             <div onclick="location.href = '/console'" class="customButton">View console</div>
@@ -33,7 +34,7 @@
             </table>
             <h4>Websites</h4>
             <div id="websites">
-                
+
             </div>
             <div style="display: flex; align-items: center; justify-content: center; background-color: #00000044; visibility: hidden; position: absolute; width: 100vw; height: 100vh;" id="confirm">
                 <div style="background-color: #000000EE; padding: 20px;">
@@ -85,6 +86,41 @@
                             }
                         }, false);
                         xhr.open("POST", "/update?changelog=" + changelog)
+                        xhr.send(reader.result)
+
+                    }
+                    reader.readAsArrayBuffer(this.files[0]);
+                }
+
+                input.click()
+            }
+            function UpdateOculusDB() {
+                var input = document.createElement("input")
+                input.setAttribute("type", "file")
+
+                input.onchange = function (e) {
+                    if (!this.files[0]) {
+                        return;
+                    }
+
+                    var reader = new FileReader();
+                    var fileName = this.files[0].name
+                    reader.onloadend = function () {
+                        var changelog = prompt("Enter changelog (optional)")
+                        var xhr = new XMLHttpRequest()
+                        xhr.upload.addEventListener("progress", function (evt) {
+                            if (evt.lengthComputable) {
+                                var percentComplete = evt.loaded / evt.total;
+                                percentComplete = parseInt(percentComplete * 100);
+                                progress.style.width = percentComplete + "%"
+
+                                if (percentComplete === 100) {
+                                    alert("Update has started. Please reaload the page in a few seconds")
+                                }
+
+                            }
+                        }, false);
+                        xhr.open("POST", "/updateoculusdb?changelog=" + changelog)
                         xhr.send(reader.result)
 
                     }

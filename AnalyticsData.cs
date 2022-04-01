@@ -68,7 +68,7 @@ namespace ComputerAnalytics
                     if (!data.endpoint.EndsWith("/")) data.endpoint += "/";
                     data.host = new Uri(data.fullUri).Host;
                     data.uA = request.context.Request.UserAgent;
-                    data.remote = Hasher.GetSHA256OfString(ip);
+                    data.remote = Hasher.GetSHA256OfString(Hasher.GetSHA256OfString(Hasher.GetSHA256OfString(Hasher.GetSHA256OfString(ip))));
                     data.duration = data.sideClose - data.sideOpen;
                     if (data.duration < 0) throw new Exception("Some idiot made a manual request with negative duration.");
                     data.openTime = TimeConverter.UnixTimeStampToDateTime(data.sideOpen);
