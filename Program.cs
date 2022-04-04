@@ -160,6 +160,11 @@ namespace ComputerAnalytics
             });
             warningSystemsAndSiteMetrics.Start();
             Logger.Log("Analytics will be send to " + collection.GetPublicAddress());
+            server.AddRoute("GET", "/randomtoken", new Func<ServerRequest, bool>(request =>
+            {
+                request.SendString(RandomExtension.CreateToken());
+                return true;
+            }));
             server.AddRoute("POST", "/analytics", new Func<ServerRequest, bool>(request =>
             {
                 string origin = request.context.Request.Headers.Get("Origin");

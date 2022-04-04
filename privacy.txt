@@ -9,10 +9,10 @@ II. What data is being collected
 		- Full url of the visited site excluding query parameters
 		- Exact time the site has been opened
 		- Exact time the site has been closed
+		- an unique id which is randomly generated to anonymise you in the data
 		- The website or url you come from (e. g. If you clicked on a link on YouTube it'll be https://youtube.com)
 		- Your devices screen width and height which may or may not be accurate
 	2. Data by the http request (those are default with everything you send over the internet)
-		- Your IP address. It is being used to count a estimate of individuals visiting the site{1}. It's being stored as hash so it's harder to assocate with someone. On top of that your IP address usually changes every few days/weeks.
 		- Your User Agent. This is usually your browser and operating system
 
 	3. Data which is NOT being collected
@@ -38,5 +38,7 @@ III. How is the data being stored?
 	How long is my data being stored?
 		It is stored indefinetly or until there's no more storage space. On latter the oldeast Analytics will get deleted.
 
+IV. Cookies
+	Cookies are used to store your unique id which is being used to estimate the amount of users visiting the site
 
 If there's anything which is needed or if there are any questions feel free to ask them on GitHub and answers will be added here. You can ask on https://github.com/ComputerElite/ComputerAnalytics/issues
