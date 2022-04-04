@@ -13,6 +13,7 @@ II. What data is being collected
 		- The website or url you come from (e. g. If you clicked on a link on YouTube it'll be https://youtube.com)
 		- Your devices screen width and height which may or may not be accurate
 	2. Data by the http request (those are default with everything you send over the internet)
+	- Your IP address which is only being used to get the countries which visit the site.
 		- Your User Agent. This is usually your browser and operating system
 
 	3. Data which is NOT being collected
