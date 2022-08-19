@@ -28,7 +28,7 @@ if(!CAid) {
 var sent = false
 
 window.onbeforeunload = SendAnalytics
-window.onunload = SendAnalytics
+window.pagehide = SendAnalytics
 window.onpopstate = SendAnalytics
 
 function SendAnalytics() {
