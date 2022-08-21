@@ -209,9 +209,10 @@ namespace ComputerAnalytics
                     request.SendString("alert(`Add '?origin=YourSite' to analytics.js src. Replace YourSite with your site e. g. https://computerelite.github.io`)", "application/javascript") ;
                     return true;
                 }
+                request.automaticHeaders.Add("Access-Control-Allow-Origin", request.queryString.Get("origin"));
                 request.SendString(ReadResource("analytics.js").Replace("{0}", "\"" + collection.GetPublicAddress() + "/\"").Replace("{1}", collection.GetPublicToken(origin)), "application/javascript");
                 return true;
-            }));
+            }), false, true, true, true, 0, true, 0);
             server.AddRoute("GET", "/analytics", new Func<ServerRequest, bool>(request =>
             {
                 if (IsNotLoggedIn(request)) return true;

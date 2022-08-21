@@ -62,5 +62,5 @@ function SetCookie(name, value, expiration) {
     var d = new Date();
     d.setTime(d.getTime() + (expiration * 24 * 60 * 60 * 1000));
     var expires = "expires=" + d.toUTCString();
-    document.cookie = name + "=" + value + ";" + expires + ";path=/";
+    document.cookie = name + "=" + value + ";" + expires + ";path=/;SameSite=None";
 }
