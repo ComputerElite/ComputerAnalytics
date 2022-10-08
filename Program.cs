@@ -1136,6 +1136,7 @@ namespace ComputerAnalytics
         public AnalyticsDatabaseCollection parentCollection = null;
         public MongoClient parentMongoClient = null;
         public string analyticsDirectory = "";
+        public string collectionName = "";
         //public List<AnalyticsData> data { get; set; } = new List<AnalyticsData>();
 
         public AnalyticsDatabase(string collectionName, AnalyticsDatabaseCollection parentCollection, string analyticsDir)
@@ -1148,7 +1149,7 @@ namespace ComputerAnalytics
 
             if (parentCollection.config.useMongoDB)
             {
-                
+                this.collectionName = collectionName;
                 Logger.Log("Loading MongoDB Collection");
                 IMongoDatabase database = parentCollection.mongoClient.GetDatabase(parentCollection.config.mongoDBName);
                 documents = database.GetCollection<BsonDocument>(collectionName);
@@ -1822,7 +1823,7 @@ namespace ComputerAnalytics
                                 new BsonDocument
                                 {
                                     { "uri", "$_id.uri" }
-                                })).ToList();
+                                })).ToList().FindAll(x => !x.uri.Contains(collectionName));
             }
             Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsReferrerId>> referrers = new Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsReferrerId>>();
             foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
