@@ -1823,7 +1823,7 @@ namespace ComputerAnalytics
                                 new BsonDocument
                                 {
                                     { "uri", "$_id.uri" }
-                                })).ToList().FindAll(x => !x.uri.Contains(collectionName));
+                                })).ToList().FindAll(x => !x._id.uri.Contains(collectionName));
             }
             Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsReferrerId>> referrers = new Dictionary<string, AnalyticsAggregationQueryResult<AnalyticsReferrerId>>();
             foreach (AnalyticsData data in usedData == null ? GetIterator() : usedData)
